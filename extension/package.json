@@ -550,15 +550,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/rubymate.git"
+    "url": "https://github.com/Balaji2682/rubymate.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/rubymate/issues",
-    "email": "support@example.com"
+    "url": "https://github.com/Balaji2682/rubymate/issues"
   },
-  "homepage": "https://github.com/your-username/rubymate#readme",
-  "license": "MIT",
-  "sponsor": {
-    "url": "https://github.com/sponsors/your-username"
-  }
+  "homepage": "https://github.com/Balaji2682/rubymate#readme",
+  "license": "MIT"
 }
