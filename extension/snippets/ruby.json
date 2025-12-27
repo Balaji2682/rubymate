@@ -1,0 +1,170 @@
+{
+  "Method Definition": {
+    "prefix": "def",
+    "body": [
+      "def ${1:method_name}${2:(${3:args})}",
+      "  $0",
+      "end"
+    ],
+    "description": "Define a method"
+  },
+  "Class Definition": {
+    "prefix": "class",
+    "body": [
+      "class ${1:ClassName}",
+      "  def initialize${2:(${3:args})}",
+      "    $0",
+      "  end",
+      "end"
+    ],
+    "description": "Define a class with initialize"
+  },
+  "Module Definition": {
+    "prefix": "mod",
+    "body": [
+      "module ${1:ModuleName}",
+      "  $0",
+      "end"
+    ],
+    "description": "Define a module"
+  },
+  "Attr Accessor": {
+    "prefix": "attr",
+    "body": ["attr_accessor :${1:attribute}"],
+    "description": "Define attr_accessor"
+  },
+  "Attr Reader": {
+    "prefix": "attr_r",
+    "body": ["attr_reader :${1:attribute}"],
+    "description": "Define attr_reader"
+  },
+  "Attr Writer": {
+    "prefix": "attr_w",
+    "body": ["attr_writer :${1:attribute}"],
+    "description": "Define attr_writer"
+  },
+  "Do Block": {
+    "prefix": "do",
+    "body": [
+      "do${1: |${2:variable}|}",
+      "  $0",
+      "end"
+    ],
+    "description": "do...end block"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition}",
+      "  $0",
+      "end"
+    ],
+    "description": "If statement"
+  },
+  "If Else Statement": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition}",
+      "  ${2}",
+      "else",
+      "  $0",
+      "end"
+    ],
+    "description": "If-else statement"
+  },
+  "Unless Statement": {
+    "prefix": "unless",
+    "body": [
+      "unless ${1:condition}",
+      "  $0",
+      "end"
+    ],
+    "description": "Unless statement"
+  },
+  "Case When": {
+    "prefix": "case",
+    "body": [
+      "case ${1:variable}",
+      "when ${2:value}",
+      "  ${3}",
+      "else",
+      "  $0",
+      "end"
+    ],
+    "description": "Case-when statement"
+  },
+  "Begin Rescue": {
+    "prefix": "begin",
+    "body": [
+      "begin",
+      "  ${1}",
+      "rescue ${2:StandardError} => ${3:e}",
+      "  $0",
+      "end"
+    ],
+    "description": "Begin-rescue block"
+  },
+  "Begin Rescue Ensure": {
+    "prefix": "begin_ensure",
+    "body": [
+      "begin",
+      "  ${1}",
+      "rescue ${2:StandardError} => ${3:e}",
+      "  ${4}",
+      "ensure",
+      "  $0",
+      "end"
+    ],
+    "description": "Begin-rescue-ensure block"
+  },
+  "Each Iterator": {
+    "prefix": "each",
+    "body": [
+      "${1:collection}.each do |${2:item}|",
+      "  $0",
+      "end"
+    ],
+    "description": "Each iterator"
+  },
+  "Map Iterator": {
+    "prefix": "map",
+    "body": [
+      "${1:collection}.map do |${2:item}|",
+      "  $0",
+      "end"
+    ],
+    "description": "Map iterator"
+  },
+  "Select Iterator": {
+    "prefix": "select",
+    "body": [
+      "${1:collection}.select do |${2:item}|",
+      "  $0",
+      "end"
+    ],
+    "description": "Select iterator"
+  },
+  "Reject Iterator": {
+    "prefix": "reject",
+    "body": [
+      "${1:collection}.reject do |${2:item}|",
+      "  $0",
+      "end"
+    ],
+    "description": "Reject iterator"
+  },
+  "Lambda": {
+    "prefix": "lambda",
+    "body": [
+      "lambda { |${1:args}| $0 }"
+    ],
+    "description": "Lambda function"
+  },
+  "Hash": {
+    "prefix": "hash",
+    "body": [
+      "{ ${1:key}: ${2:value} }"
+    ],
+    "description": "Hash literal"
+  }
+}

@@ -1,0 +1,24 @@
+node_modules/
+out/
+*.vsix
+.vscode-test/
+*.log
+
+# Ruby
+*.gem
+.bundle/
+vendor/
+.ruby-version
+.ruby-gemset
+Gemfile.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

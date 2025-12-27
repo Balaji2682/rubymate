@@ -1,0 +1,46 @@
+# VS Code Extension Packaging - Exclude from VSIX
+
+# Source files
+src/**
+**/*.ts
+**/*.map
+tsconfig.json
+esbuild.js
+
+# Development files
+node_modules/**
+.vscode/**
+.vscode-test/**
+.git/**
+.gitignore
+
+# Documentation (keep only what's needed)
+.editorconfig
+.prettierrc
+.eslintrc.json
+
+# Test files
+test/**
+**/*.test.ts
+**/*.spec.ts
+coverage/**
+
+# Build artifacts (keep out/ directory for compiled JS)
+*.log
+*.lock
+package-lock.json
+yarn.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/**
+*.swp
+*.swo
+*~
+
+# Misc
+*.vsix
+.github/**

@@ -1,0 +1,20 @@
+{
+  "name": "rubymate-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RubyMate workspace root",
+  "scripts": {
+    "install:extension": "cd extension && npm install",
+    "install:gem": "cd gem && bundle install",
+    "install:all": "npm run install:extension && npm run install:gem",
+    "build": "cd extension && npm run compile",
+    "watch": "cd extension && npm run watch",
+    "package": "cd extension && npm run package",
+    "lint": "cd extension && npm run lint",
+    "test:extension": "cd extension && npm test",
+    "test:gem": "cd gem && bundle exec rake test"
+  },
+  "workspaces": [
+    "extension"
+  ]
+}

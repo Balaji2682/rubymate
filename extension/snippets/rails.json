@@ -1,0 +1,163 @@
+{
+  "Controller Action": {
+    "prefix": "cont",
+    "body": [
+      "def ${1:action_name}",
+      "  ${2:@${3:variable} = ${4:value}}",
+      "  $0",
+      "end"
+    ],
+    "description": "Controller action"
+  },
+  "Model with Validation": {
+    "prefix": "mod",
+    "body": [
+      "class ${1:ModelName} < ApplicationRecord",
+      "  validates :${2:attribute}, presence: true${3:, uniqueness: true}",
+      "  $0",
+      "end"
+    ],
+    "description": "Rails model with validation"
+  },
+  "Migration": {
+    "prefix": "mig",
+    "body": [
+      "class ${1:MigrationName} < ActiveRecord::Migration[${2:7.0}]",
+      "  def change",
+      "    ${3:create_table :${4:table_name} do |t|}",
+      "      $0",
+      "      t.timestamps",
+      "    end",
+      "  end",
+      "end"
+    ],
+    "description": "Rails migration"
+  },
+  "Route Definition": {
+    "prefix": "route",
+    "body": [
+      "${1|get,post,put,patch,delete|} '${2:path}', to: '${3:controller}#${4:action}'"
+    ],
+    "description": "Rails route"
+  },
+  "Resources Route": {
+    "prefix": "resources",
+    "body": [
+      "resources :${1:resource_name}${2:, only: [:${3:index}, :${4:show}]}"
+    ],
+    "description": "Rails resources route"
+  },
+  "Validation": {
+    "prefix": "val",
+    "body": [
+      "validates :${1:attribute}, ${2|presence,uniqueness,length,format,numericality|}: ${3:true}"
+    ],
+    "description": "Model validation"
+  },
+  "Scope": {
+    "prefix": "scope",
+    "body": [
+      "scope :${1:name}, -> { ${2:where(${3:condition})} }"
+    ],
+    "description": "Named scope"
+  },
+  "Has Many": {
+    "prefix": "has",
+    "body": [
+      "has_many :${1:association}${2:, dependent: :${3|destroy,nullify,restrict_with_exception|}}"
+    ],
+    "description": "has_many association"
+  },
+  "Belongs To": {
+    "prefix": "belongs",
+    "body": [
+      "belongs_to :${1:association}${2:, optional: ${3|true,false|}}"
+    ],
+    "description": "belongs_to association"
+  },
+  "Has One": {
+    "prefix": "has_one",
+    "body": [
+      "has_one :${1:association}${2:, dependent: :${3|destroy,nullify|}}"
+    ],
+    "description": "has_one association"
+  },
+  "Before Action": {
+    "prefix": "before",
+    "body": [
+      "before_action :${1:method_name}${2:, only: [:${3:action}]}"
+    ],
+    "description": "before_action callback"
+  },
+  "After Action": {
+    "prefix": "after",
+    "body": [
+      "after_action :${1:method_name}${2:, only: [:${3:action}]}"
+    ],
+    "description": "after_action callback"
+  },
+  "Render JSON": {
+    "prefix": "render_json",
+    "body": [
+      "render json: ${1:@variable}${2:, status: :${3|ok,created,unprocessable_entity,not_found|}}"
+    ],
+    "description": "Render JSON response"
+  },
+  "Redirect To": {
+    "prefix": "redirect",
+    "body": [
+      "redirect_to ${1:path}${2:, notice: '${3:message}'}"
+    ],
+    "description": "Redirect to path"
+  },
+  "Params Permit": {
+    "prefix": "params",
+    "body": [
+      "params.require(:${1:model}).permit(${2::attribute})"
+    ],
+    "description": "Strong parameters"
+  },
+  "RSpec Describe": {
+    "prefix": "describe",
+    "body": [
+      "describe '${1:description}' do",
+      "  $0",
+      "end"
+    ],
+    "description": "RSpec describe block"
+  },
+  "RSpec It": {
+    "prefix": "it",
+    "body": [
+      "it '${1:description}' do",
+      "  $0",
+      "end"
+    ],
+    "description": "RSpec it block"
+  },
+  "RSpec Context": {
+    "prefix": "context",
+    "body": [
+      "context '${1:context}' do",
+      "  $0",
+      "end"
+    ],
+    "description": "RSpec context block"
+  },
+  "RSpec Let": {
+    "prefix": "let",
+    "body": [
+      "let(:${1:variable}) { ${2:value} }"
+    ],
+    "description": "RSpec let"
+  },
+  "RSpec Before": {
+    "prefix": "before",
+    "body": [
+      "before do",
+      "  $0",
+      "end"
+    ],
+    "description": "RSpec before hook"
+  }
+}
