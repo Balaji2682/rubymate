@@ -234,17 +234,17 @@ export class StatusBarManager {
                 break;
             case '$(book) Documentation':
                 await vscode.env.openExternal(
-                    vscode.Uri.parse('https://github.com/yourusername/rubymate#readme')
+                    vscode.Uri.parse('https://github.com/Balaji2682/rubymate#readme')
                 );
                 break;
             case '$(github) View on GitHub':
                 await vscode.env.openExternal(
-                    vscode.Uri.parse('https://github.com/yourusername/rubymate')
+                    vscode.Uri.parse('https://github.com/Balaji2682/rubymate')
                 );
                 break;
             case '$(comment) Report Issue':
                 await vscode.env.openExternal(
-                    vscode.Uri.parse('https://github.com/yourusername/rubymate/issues/new')
+                    vscode.Uri.parse('https://github.com/Balaji2682/rubymate/issues/new')
                 );
                 break;
             case '$(output) Show Output':
