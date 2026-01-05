@@ -1,16 +1,13 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer, RubySymbol } from '../advancedIndexer';
-import { SorbetIntegration } from '../sorbetIntegration';
 
 /**
  * Provides hover information like IDE Ctrl+Q (Quick Documentation)
  * Shows method signatures, parameter info, and documentation
- * Integrates with Sorbet for enhanced type information when available
  */
 export class RubyHoverProvider implements vscode.HoverProvider {
     constructor(
-        private indexer: AdvancedRubyIndexer,
-        private sorbetIntegration?: SorbetIntegration
+        private indexer: AdvancedRubyIndexer
     ) {}
 
     async provideHover(
@@ -44,25 +41,7 @@ export class RubyHoverProvider implements vscode.HoverProvider {
             }
         }
 
-        // Enhance with Sorbet type information if available
-        if (this.sorbetIntegration && this.sorbetIntegration.isSorbetAvailable()) {
-            try {
-                const enhancedHover = await this.sorbetIntegration.enhanceHover(
-                    document,
-                    position,
-                    baseHover
-                );
-
-                if (enhancedHover) {
-                    return enhancedHover;
-                }
-            } catch (error) {
-                // Fall back to base hover if Sorbet enhancement fails
-                console.error('[HOVER] Sorbet enhancement failed:', error);
-            }
-        }
-
-        // Return base hover (or undefined if no symbols found)
+        // Return hover (or undefined if no symbols found)
         return baseHover || undefined;
     }
 

@@ -20,11 +20,9 @@ import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
 import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
 import { RubyFormattingProvider } from './providers/rubyFormattingProvider';
 import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rubyAutoEndProvider';
-import { SorbetDiagnostics } from './sorbetDiagnostics';
 import { ConfigValidator } from './configValidator';
 import { StatusBarManager, ExtensionState } from './statusBarManager';
 import { TelemetryManager } from './telemetryManager';
-import { SorbetIntegration } from './sorbetIntegration';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -51,10 +49,6 @@ let statusBarManager: StatusBarManager;
 
 // Telemetry (privacy-respecting)
 let telemetryManager: TelemetryManager;
-
-// Sorbet integration
-let sorbetIntegration: SorbetIntegration;
-let sorbetDiagnostics: SorbetDiagnostics;
 
 // Database features
 let schemaParser: SchemaParser;
@@ -83,21 +77,6 @@ export async function activate(context: vscode.ExtensionContext) {
             await telemetryManager.dispose();
         }
     });
-
-    // Initialize Sorbet integration (detects and leverages Sorbet extension)
-    // FIX: Now using async initialize() to prevent race conditions
-    sorbetIntegration = new SorbetIntegration(outputChannel);
-    await sorbetIntegration.initialize(); // FIX: Await initialization
-    sorbetIntegration.showStatus();
-    context.subscriptions.push(sorbetIntegration); // FIX: Add to disposables
-
-    // Initialize Sorbet diagnostics collection
-    sorbetDiagnostics = new SorbetDiagnostics(sorbetIntegration, outputChannel);
-    sorbetDiagnostics.startListening(context);
-    context.subscriptions.push(sorbetDiagnostics);
-
-    // Check Sorbet configuration and prompt setup if needed
-    await sorbetIntegration.promptSorbetSetup();
 
     // ========== PHASE 0: Configuration Validation (Critical) ==========
     // Validate configuration before initializing other features
@@ -188,14 +167,26 @@ export async function activate(context: vscode.ExtensionContext) {
     // Index workspace symbols in background (don't block activation)
     statusBarManager.setIndexing('Indexing workspace...');
     telemetryManager.startPerformance('workspace-indexing');
-    indexWorkspace(context).then(() => {
-        telemetryManager.endPerformance('workspace-indexing');
-        statusBarManager.setReady();
-    }).catch(err => {
-        outputChannel.appendLine(`Failed to index workspace: ${err}`);
-        telemetryManager.trackError('workspace-indexing-failed', 'indexing', err);
-        statusBarManager.setError('Index failed');
+
+    // Wrap indexing with timeout to prevent infinite loading
+    const indexingTimeout = new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('Indexing timeout after 60 seconds')), 60000);
     });
+
+    Promise.race([indexWorkspace(context), indexingTimeout])
+        .then(() => {
+            telemetryManager.endPerformance('workspace-indexing');
+            statusBarManager.setReady();
+            outputChannel.appendLine('Workspace indexing completed successfully');
+        })
+        .catch(err => {
+            outputChannel.appendLine(`Failed to index workspace: ${err}`);
+            telemetryManager.trackError('workspace-indexing-failed', 'indexing', err);
+            statusBarManager.setReady(); // Set to ready even on error to stop spinning
+            vscode.window.showWarningMessage(
+                `RubyMate: Workspace indexing ${err.message?.includes('timeout') ? 'timed out' : 'failed'}. Some features may be limited.`
+            );
+        });
 
     // Watch for file changes to re-index
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.rb');
@@ -208,16 +199,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const activationTime = Date.now() - startTime;
     outputChannel.appendLine(`RubyMate activated in ${activationTime}ms (lazy loading enabled)`);
-
-    // Update status bar with Sorbet type level if available
-    if (sorbetIntegration.isSorbetAvailable()) {
-        const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor && activeEditor.document.languageId === 'ruby') {
-            const typeLevel = sorbetIntegration.getSorbetTypeLevel(activeEditor.document);
-            const isConfigured = await sorbetIntegration.isSorbetConfigured();
-            statusBarManager.setSorbetStatus(typeLevel, isConfigured);
-        }
-    }
 
     // Show temporary success message in status bar
     statusBarManager.showTemporaryMessage(`Ready! (${activationTime}ms)`, 3000);
@@ -505,24 +486,24 @@ function registerProviders(context: vscode.ExtensionContext) {
         vscode.languages.registerDocumentSymbolProvider(rubySelector, documentSymbolProvider)
     );
 
-    // Comprehensive definition provider using our index + Sorbet
+    // Comprehensive definition provider using our index
     // Handles: classes, methods, requires, constants
     // Shows popup when multiple results found (like IDE)
-    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer, sorbetIntegration);
+    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer);
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(rubySelector, rubyDefinitionProvider)
     );
 
     // IDE-like features
 
-    // Find All References (like IDE's Alt+F7) - combines Sorbet + RubyMate
-    const referenceProvider = new RubyReferenceProvider(symbolIndexer, sorbetIntegration);
+    // Find All References (like IDE's Alt+F7)
+    const referenceProvider = new RubyReferenceProvider(symbolIndexer);
     context.subscriptions.push(
         vscode.languages.registerReferenceProvider(rubySelector, referenceProvider)
     );
 
-    // Hover provider for documentation (like IDE's Ctrl+Q) - enhanced with Sorbet types
-    const hoverProvider = new RubyHoverProvider(symbolIndexer, sorbetIntegration);
+    // Hover provider for documentation (like IDE's Ctrl+Q)
+    const hoverProvider = new RubyHoverProvider(symbolIndexer);
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(rubySelector, hoverProvider)
     );
@@ -557,30 +538,6 @@ function registerProviders(context: vscode.ExtensionContext) {
             '\n', ' ' // Trigger on newline and space
         )
     );
-
-    // ========== SORBET INTEGRATION NOTES ==========
-    // Sorbet extension provides its own native LSP providers:
-    // - Autocomplete with type signatures
-    // - Signature help (parameter hints)
-    // - Code actions (quick fixes)
-    // - Diagnostics (type errors)
-    //
-    // RubyMate enhances existing providers with Sorbet integration:
-    // - Hover: Enhanced with Sorbet type info (sorbetIntegration.ts:272-308)
-    // - Definition: Tries Sorbet first, falls back to index (rubyDefinitionProvider.ts:37-51)
-    // - References: Combines Sorbet + RubyMate search (referenceProvider.ts:43-62)
-    //
-    // RubyMate monitors Sorbet status:
-    // - Diagnostics collection (sorbetDiagnostics.ts)
-    // - Configuration detection (sorbetIntegration.ts:361-420)
-    // - Status bar integration (statusBarManager.ts:115-134)
-
-    if (sorbetIntegration.isSorbetAvailable()) {
-        outputChannel.appendLine('[SORBET] Integration active - Using Sorbet extension providers');
-        outputChannel.appendLine('[SORBET] Enhanced: Hover, Definition, References');
-    } else {
-        outputChannel.appendLine('[SORBET] Not available - Using RubyMate-only providers');
-    }
 
     // Format on save (if enabled)
     context.subscriptions.push(

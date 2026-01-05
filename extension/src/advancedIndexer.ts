@@ -194,6 +194,7 @@ export class AdvancedRubyIndexer {
      */
     async indexWorkspace(): Promise<void> {
         if (this.indexing) {
+            this.outputChannel.appendLine('Indexing already in progress, skipping duplicate request');
             return;
         }
 
@@ -204,13 +205,25 @@ export class AdvancedRubyIndexer {
             this.outputChannel.appendLine('Starting intelligent workspace indexing...');
 
             // Phase 1: Index open files first (instant)
-            await this.indexOpenFiles();
+            try {
+                await this.indexOpenFiles();
+            } catch (err) {
+                this.outputChannel.appendLine(`Error indexing open files: ${err}`);
+            }
 
             // Phase 2: Index visible files in background
-            await this.indexVisibleFiles();
+            try {
+                await this.indexVisibleFiles();
+            } catch (err) {
+                this.outputChannel.appendLine(`Error indexing visible files: ${err}`);
+            }
 
             // Phase 3: Index project files incrementally
-            await this.indexProjectFiles();
+            try {
+                await this.indexProjectFiles();
+            } catch (err) {
+                this.outputChannel.appendLine(`Error indexing project files: ${err}`);
+            }
 
             // Phase 4: Index gems in background (low priority)
             this.indexGems().catch(err => {
@@ -218,7 +231,11 @@ export class AdvancedRubyIndexer {
             });
 
             // Save cache
-            await this.saveCache();
+            try {
+                await this.saveCache();
+            } catch (err) {
+                this.outputChannel.appendLine(`Error saving cache: ${err}`);
+            }
 
             const duration = Date.now() - startTime;
             const stats = this.getStats();
@@ -226,7 +243,8 @@ export class AdvancedRubyIndexer {
                 `Indexed ${stats.totalSymbols} symbols in ${stats.indexedFiles} files (${duration}ms)`
             );
         } catch (error) {
-            this.outputChannel.appendLine(`Error during indexing: ${error}`);
+            this.outputChannel.appendLine(`Critical error during indexing: ${error}`);
+            throw error; // Re-throw to trigger timeout/error handling
         } finally {
             this.indexing = false;
         }

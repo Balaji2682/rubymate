@@ -110,30 +110,6 @@ export class StatusBarManager {
     }
 
     /**
-     * Update status bar to show Sorbet type level
-     */
-    setSorbetStatus(typeLevel: string | null, isConfigured: boolean): void {
-        if (!typeLevel && !isConfigured) {
-            // No Sorbet in project
-            return;
-        }
-
-        let message = 'RubyMate';
-        let tooltip = 'RubyMate is ready - Click for commands';
-
-        if (typeLevel) {
-            message = `RubyMate (Sorbet: ${typeLevel})`;
-            tooltip = `RubyMate with Sorbet type checking (${typeLevel} level) - Click for commands`;
-        } else if (isConfigured) {
-            message = 'RubyMate (Sorbet)';
-            tooltip = 'RubyMate with Sorbet integration - Click for commands';
-        }
-
-        this.updateStatusBar(this.currentState, message);
-        this.statusBarItem.tooltip = tooltip;
-    }
-
-    /**
      * Show the quick actions menu
      */
     async showQuickMenu(): Promise<void> {

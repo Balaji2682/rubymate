@@ -454,11 +454,6 @@
     "configuration": {
       "title": "RubyMate",
       "properties": {
-        "rubymate.enableRubyLSP": {
-          "type": "boolean",
-          "default": false,
-          "description": "DEPRECATED: Ruby LSP integration removed due to compatibility issues. RubyMate now uses custom indexers and providers."
-        },
         "rubymate.enableSolargraph": {
           "type": "boolean",
           "default": true,
@@ -493,11 +488,6 @@
           ],
           "default": "auto",
           "description": "Test framework to use"
-        },
-        "rubymate.checkRequiredGems": {
-          "type": "boolean",
-          "default": false,
-          "description": "DEPRECATED: No longer needed as ruby-lsp integration was removed"
         },
         "rubymate.enableN1Detection": {
           "type": "boolean",

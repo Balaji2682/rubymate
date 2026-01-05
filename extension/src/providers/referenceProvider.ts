@@ -1,16 +1,13 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
-import { SorbetIntegration } from '../sorbetIntegration';
 
 /**
  * Provides "Find All References" functionality like IDE Alt+F7
  * Shows all places where a class, method, constant, or variable is used
- * Integrates with Sorbet for more accurate results when available
  */
 export class RubyReferenceProvider implements vscode.ReferenceProvider {
     constructor(
-        private indexer: AdvancedRubyIndexer,
-        private sorbetIntegration?: SorbetIntegration
+        private indexer: AdvancedRubyIndexer
     ) {}
 
     async provideReferences(
@@ -40,29 +37,7 @@ export class RubyReferenceProvider implements vscode.ReferenceProvider {
             async (progress, progressToken) => {
                 const references: vscode.Location[] = [];
 
-                // Try Sorbet first for enhanced accuracy (if available and Sorbet signatures present)
-                if (this.sorbetIntegration && this.sorbetIntegration.isSorbetAvailable()) {
-                    try {
-                        const hasSorbet = await this.sorbetIntegration.hasSorbetSignatures(document);
-                        if (hasSorbet) {
-                            progress.report({ message: 'Querying Sorbet...' });
-                            const sorbetRefs = await this.sorbetIntegration.getReferences(
-                                document,
-                                position,
-                                context.includeDeclaration
-                            );
-                            if (sorbetRefs && sorbetRefs.length > 0) {
-                                references.push(...sorbetRefs);
-                            }
-                        }
-                    } catch (error) {
-                        // Fall back to RubyMate search
-                        console.error('[REFERENCES] Sorbet lookup failed:', error);
-                    }
-                }
-
-                // Continue with RubyMate's comprehensive search
-                // This complements Sorbet by finding references in non-typed code
+                // Perform RubyMate's comprehensive search
                 let timedOut = false;
 
                 // Add timeout: 2 minutes max for reference search
