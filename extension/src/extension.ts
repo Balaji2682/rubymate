@@ -165,24 +165,35 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // ========== PHASE 4: Workspace Indexing (Background) ==========
     // Index workspace symbols in background (don't block activation)
+    outputChannel.appendLine('[INDEXING] Starting workspace indexing in background...');
     statusBarManager.setIndexing('Indexing workspace...');
     telemetryManager.startPerformance('workspace-indexing');
 
-    // Wrap indexing with timeout to prevent infinite loading
+    // Wrap indexing with timeout to prevent infinite loading (60 seconds)
+    let timeoutId: NodeJS.Timeout;
     const indexingTimeout = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error('Indexing timeout after 60 seconds')), 60000);
+        timeoutId = setTimeout(() => {
+            outputChannel.appendLine('[INDEXING] ⚠️ TIMEOUT: Indexing took longer than 60 seconds');
+            reject(new Error('Indexing timeout after 60 seconds'));
+        }, 60000);
     });
 
+    outputChannel.appendLine('[INDEXING] Starting Promise.race with 60s timeout...');
     Promise.race([indexWorkspace(context), indexingTimeout])
         .then(() => {
+            clearTimeout(timeoutId); // Clear the timeout on success
+            outputChannel.appendLine('[INDEXING] ✅ SUCCESS: Indexing completed');
             telemetryManager.endPerformance('workspace-indexing');
             statusBarManager.setReady();
-            outputChannel.appendLine('Workspace indexing completed successfully');
+            outputChannel.appendLine('[INDEXING] Status bar set to READY');
         })
         .catch(err => {
-            outputChannel.appendLine(`Failed to index workspace: ${err}`);
+            clearTimeout(timeoutId); // Clear the timeout on error too
+            outputChannel.appendLine(`[INDEXING] ❌ ERROR: ${err.message}`);
+            outputChannel.appendLine(`[INDEXING] Error stack: ${err.stack}`);
             telemetryManager.trackError('workspace-indexing-failed', 'indexing', err);
             statusBarManager.setReady(); // Set to ready even on error to stop spinning
+            outputChannel.appendLine('[INDEXING] Status bar set to READY (after error)');
             vscode.window.showWarningMessage(
                 `RubyMate: Workspace indexing ${err.message?.includes('timeout') ? 'timed out' : 'failed'}. Some features may be limited.`
             );
@@ -199,9 +210,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const activationTime = Date.now() - startTime;
     outputChannel.appendLine(`RubyMate activated in ${activationTime}ms (lazy loading enabled)`);
-
-    // Show temporary success message in status bar
-    statusBarManager.showTemporaryMessage(`Ready! (${activationTime}ms)`, 3000);
+    outputChannel.appendLine('Workspace indexing running in background...');
 }
 
 // ========== Database Features Initialization ==========
