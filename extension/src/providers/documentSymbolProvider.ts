@@ -24,11 +24,17 @@ export class RubyDocumentSymbolProvider implements vscode.DocumentSymbolProvider
 
         for (const symbol of symbols) {
             const range = symbol.location.range;
+
+            // Calculate selectionRange ensuring it's contained within range
+            const selectionEnd = new vscode.Position(
+                range.start.line,
+                Math.min(range.start.character + symbol.name.length, range.end.character)
+            );
+
+            // Ensure selectionRange is valid and contained in range
             const selectionRange = new vscode.Range(
-                range.start.line,
-                range.start.character,
-                range.start.line,
-                range.start.character + symbol.name.length
+                range.start,
+                selectionEnd.isAfter(range.end) ? range.end : selectionEnd
             );
 
             const docSymbol = new vscode.DocumentSymbol(

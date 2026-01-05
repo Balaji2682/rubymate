@@ -124,6 +124,9 @@ export class TelemetryManager {
                 sendErrorData: (error, data) => {
                     // Error telemetry (only if enabled)
                     this.outputChannel.appendLine(`Telemetry error: ${error.name}`);
+                    this.outputChannel.appendLine(`  Message: ${error.message}`);
+                    this.outputChannel.appendLine(`  Stack: ${error.stack?.substring(0, 200)}`);
+                    this.outputChannel.appendLine(`  Data: ${JSON.stringify(data)}`);
                 }
             });
         } catch (error) {
@@ -239,7 +242,7 @@ export class TelemetryManager {
             );
 
             if (choice === 'Learn More') {
-                vscode.env.openExternal(vscode.Uri.parse('https://github.com/yourusername/rubymate#telemetry'));
+                vscode.env.openExternal(vscode.Uri.parse('https://github.com/Balaji2682/rubymate#telemetry'));
             } else if (choice === 'View Statistics') {
                 this.showStatistics();
             }
@@ -257,10 +260,14 @@ export class TelemetryManager {
         this.featureUsage.set(featureName, current + 1);
 
         // Send to telemetry if enabled
-        this.telemetryReporter?.logUsage('feature', {
-            name: featureName,
-            sessionId: this.sessionId
-        });
+        try {
+            this.telemetryReporter?.logUsage('feature', {
+                name: featureName,
+                sessionId: this.sessionId
+            });
+        } catch (err) {
+            // Silently ignore telemetry errors
+        }
 
         // Comprehensive logging
         this.outputChannel.appendLine(`[TELEMETRY] Feature used: ${featureName} (total: ${current + 1})`);
@@ -273,10 +280,14 @@ export class TelemetryManager {
         const current = this.commandUsage.get(commandName) || 0;
         this.commandUsage.set(commandName, current + 1);
 
-        this.telemetryReporter?.logUsage('command', {
-            name: commandName,
-            sessionId: this.sessionId
-        });
+        try {
+            this.telemetryReporter?.logUsage('command', {
+                name: commandName,
+                sessionId: this.sessionId
+            });
+        } catch (err) {
+            // Silently ignore telemetry errors
+        }
 
         // Comprehensive logging
         this.outputChannel.appendLine(`[TELEMETRY] Command executed: ${commandName} (total: ${current + 1})`);
@@ -289,10 +300,14 @@ export class TelemetryManager {
         const current = this.providerUsage.get(providerName) || 0;
         this.providerUsage.set(providerName, current + 1);
 
-        this.telemetryReporter?.logUsage('provider', {
-            name: providerName,
-            sessionId: this.sessionId
-        });
+        try {
+            this.telemetryReporter?.logUsage('provider', {
+                name: providerName,
+                sessionId: this.sessionId
+            });
+        } catch (err) {
+            // Silently ignore telemetry errors
+        }
 
         // Log every 10th use to avoid spam
         if ((current + 1) % 10 === 0) {
@@ -327,10 +342,17 @@ export class TelemetryManager {
         }
 
         // Send to telemetry if enabled
-        this.telemetryReporter?.logError(new Error(errorType), {
-            feature,
-            sessionId: this.sessionId
-        });
+        try {
+            this.telemetryReporter?.sendErrorTelemetry(errorType, {
+                feature,
+                sessionId: this.sessionId,
+                errorMessage: error?.message,
+                stackHash: error?.stack ? this.hashSensitiveData(error.stack) : undefined
+            });
+        } catch (err) {
+            // Silently fail - telemetry errors shouldn't break functionality
+            this.outputChannel.appendLine(`[WARN] Failed to send error telemetry: ${err}`);
+        }
 
         // Comprehensive error logging
         this.outputChannel.appendLine('');
@@ -371,12 +393,16 @@ export class TelemetryManager {
             itemCount
         });
 
-        this.telemetryReporter?.logUsage('performance', {
-            operation,
-            duration: duration.toString(),
-            itemCount: itemCount?.toString(),
-            sessionId: this.sessionId
-        });
+        try {
+            this.telemetryReporter?.logUsage('performance', {
+                operation,
+                duration: duration.toString(),
+                itemCount: itemCount?.toString(),
+                sessionId: this.sessionId
+            });
+        } catch (err) {
+            // Silently ignore telemetry errors
+        }
 
         this.outputChannel.appendLine(`Performance: ${operation} took ${duration}ms${itemCount ? ` (${itemCount} items)` : ''}`);
     }
