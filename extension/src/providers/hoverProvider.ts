@@ -1,12 +1,17 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer, RubySymbol } from '../advancedIndexer';
+import { SorbetIntegration } from '../sorbetIntegration';
 
 /**
  * Provides hover information like IDE Ctrl+Q (Quick Documentation)
  * Shows method signatures, parameter info, and documentation
+ * Integrates with Sorbet for enhanced type information when available
  */
 export class RubyHoverProvider implements vscode.HoverProvider {
-    constructor(private indexer: AdvancedRubyIndexer) {}
+    constructor(
+        private indexer: AdvancedRubyIndexer,
+        private sorbetIntegration?: SorbetIntegration
+    ) {}
 
     async provideHover(
         document: vscode.TextDocument,
@@ -25,21 +30,40 @@ export class RubyHoverProvider implements vscode.HoverProvider {
         const word = document.getText(wordRange);
         const line = document.lineAt(position.line).text;
 
-        // Try to find the symbol
+        // Build base hover from RubyMate index
+        let baseHover: vscode.Hover | null = null;
         const symbols = this.indexer.findSymbols(word);
-        if (symbols.length === 0) {
-            return undefined;
+
+        if (symbols.length > 0) {
+            // Prioritize by context
+            const symbol = this.findBestMatch(symbols, word, line, document, position);
+            if (symbol) {
+                // Build hover content from RubyMate
+                const hoverContent = this.buildHoverContent(symbol);
+                baseHover = new vscode.Hover(hoverContent, wordRange);
+            }
         }
 
-        // Prioritize by context
-        const symbol = this.findBestMatch(symbols, word, line, document, position);
-        if (!symbol) {
-            return undefined;
+        // Enhance with Sorbet type information if available
+        if (this.sorbetIntegration && this.sorbetIntegration.isSorbetAvailable()) {
+            try {
+                const enhancedHover = await this.sorbetIntegration.enhanceHover(
+                    document,
+                    position,
+                    baseHover
+                );
+
+                if (enhancedHover) {
+                    return enhancedHover;
+                }
+            } catch (error) {
+                // Fall back to base hover if Sorbet enhancement fails
+                console.error('[HOVER] Sorbet enhancement failed:', error);
+            }
         }
 
-        // Build hover content
-        const hover = this.buildHoverContent(symbol);
-        return new vscode.Hover(hover, wordRange);
+        // Return base hover (or undefined if no symbols found)
+        return baseHover || undefined;
     }
 
     private findBestMatch(

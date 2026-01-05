@@ -259,9 +259,30 @@ export class RailsIntelligence {
     }
 
     /**
-     * Parse routes.rb and extract route information
+     * Parse routes.rb and extract route information with progress indicator
      */
-    async parseRoutes(): Promise<void> {
+    async parseRoutes(showProgress: boolean = true): Promise<void> {
+        if (!showProgress) {
+            // Fast path without progress indicator
+            return this.parseRoutesInternal();
+        }
+
+        // Show progress indicator for potentially long operation
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Analyzing Rails routes...",
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ increment: 0, message: 'Reading routes.rb...' });
+            await this.parseRoutesInternal();
+            progress.report({ increment: 100, message: `Found ${this.routes.size} routes` });
+        });
+    }
+
+    /**
+     * Internal route parsing implementation
+     */
+    private async parseRoutesInternal(): Promise<void> {
         const routesPath = path.join(this.workspaceRoot, 'config', 'routes.rb');
 
         try {

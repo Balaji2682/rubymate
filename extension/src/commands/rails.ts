@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { escapeShellArg, sanitizeRailsName } from '../utils/shellEscape';
 
 export interface RailsRoute {
     name?: string;
@@ -432,6 +433,15 @@ export class RailsCommands {
 
         if (!modelName) return;
 
+        // SECURITY: Sanitize model name to prevent command injection
+        const sanitizedModelName = sanitizeRailsName(modelName);
+        if (!sanitizedModelName) {
+            vscode.window.showErrorMessage(
+                `Invalid model name "${modelName}". Use only letters, numbers, and underscores.`
+            );
+            return;
+        }
+
         const attributes = await vscode.window.showInputBox({
             prompt: 'Enter attributes (e.g., name:string email:string)',
             placeHolder: 'name:string email:string age:integer'
@@ -439,7 +449,10 @@ export class RailsCommands {
 
         const terminal = vscode.window.createTerminal('Rails Generate');
         terminal.show();
-        terminal.sendText(`rails generate model ${modelName} ${attributes || ''}`);
+        // SECURITY: Escape shell arguments to prevent command injection
+        const escapedModelName = escapeShellArg(sanitizedModelName);
+        const escapedAttributes = attributes ? escapeShellArg(attributes) : '';
+        terminal.sendText(`rails generate model ${escapedModelName} ${escapedAttributes}`);
     }
 
     private async generateController(): Promise<void> {
@@ -450,6 +463,15 @@ export class RailsCommands {
 
         if (!controllerName) return;
 
+        // SECURITY: Sanitize controller name to prevent command injection
+        const sanitizedControllerName = sanitizeRailsName(controllerName);
+        if (!sanitizedControllerName) {
+            vscode.window.showErrorMessage(
+                `Invalid controller name "${controllerName}". Use only letters, numbers, and underscores.`
+            );
+            return;
+        }
+
         const actions = await vscode.window.showInputBox({
             prompt: 'Enter actions (optional)',
             placeHolder: 'index show new create'
@@ -457,7 +479,10 @@ export class RailsCommands {
 
         const terminal = vscode.window.createTerminal('Rails Generate');
         terminal.show();
-        terminal.sendText(`rails generate controller ${controllerName} ${actions || ''}`);
+        // SECURITY: Escape shell arguments to prevent command injection
+        const escapedControllerName = escapeShellArg(sanitizedControllerName);
+        const escapedActions = actions ? escapeShellArg(actions) : '';
+        terminal.sendText(`rails generate controller ${escapedControllerName} ${escapedActions}`);
     }
 
     private async generateMigration(): Promise<void> {
@@ -468,9 +493,20 @@ export class RailsCommands {
 
         if (!migrationName) return;
 
+        // SECURITY: Sanitize migration name to prevent command injection
+        const sanitizedMigrationName = sanitizeRailsName(migrationName);
+        if (!sanitizedMigrationName) {
+            vscode.window.showErrorMessage(
+                `Invalid migration name "${migrationName}". Use only letters, numbers, and underscores.`
+            );
+            return;
+        }
+
         const terminal = vscode.window.createTerminal('Rails Generate');
         terminal.show();
-        terminal.sendText(`rails generate migration ${migrationName}`);
+        // SECURITY: Escape shell argument to prevent command injection
+        const escapedMigrationName = escapeShellArg(sanitizedMigrationName);
+        terminal.sendText(`rails generate migration ${escapedMigrationName}`);
     }
 
     private async generateScaffold(): Promise<void> {
@@ -481,6 +517,15 @@ export class RailsCommands {
 
         if (!resourceName) return;
 
+        // SECURITY: Sanitize resource name to prevent command injection
+        const sanitizedResourceName = sanitizeRailsName(resourceName);
+        if (!sanitizedResourceName) {
+            vscode.window.showErrorMessage(
+                `Invalid resource name "${resourceName}". Use only letters, numbers, and underscores.`
+            );
+            return;
+        }
+
         const attributes = await vscode.window.showInputBox({
             prompt: 'Enter attributes',
             placeHolder: 'title:string content:text'
@@ -488,7 +533,10 @@ export class RailsCommands {
 
         const terminal = vscode.window.createTerminal('Rails Generate');
         terminal.show();
-        terminal.sendText(`rails generate scaffold ${resourceName} ${attributes || ''}`);
+        // SECURITY: Escape shell arguments to prevent command injection
+        const escapedResourceName = escapeShellArg(sanitizedResourceName);
+        const escapedAttributes = attributes ? escapeShellArg(attributes) : '';
+        terminal.sendText(`rails generate scaffold ${escapedResourceName} ${escapedAttributes}`);
     }
 
     private async openConsole(): Promise<void> {
@@ -573,9 +621,21 @@ export class RailsCommands {
             value: '1'
         });
 
+        // SECURITY: Validate that steps is a positive integer
+        const stepsValue = steps || '1';
+        const stepsNum = parseInt(stepsValue, 10);
+
+        if (isNaN(stepsNum) || stepsNum <= 0 || stepsNum > 1000) {
+            vscode.window.showErrorMessage(
+                `Invalid step count "${stepsValue}". Must be a number between 1 and 1000.`
+            );
+            return;
+        }
+
         const terminal = vscode.window.createTerminal('Rails Rollback');
         terminal.show();
-        terminal.sendText(`rails db:rollback STEP=${steps || '1'}`);
+        // SECURITY: Use validated integer to prevent command injection
+        terminal.sendText(`rails db:rollback STEP=${stepsNum}`);
     }
 
     private async goToConcern(): Promise<void> {

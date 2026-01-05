@@ -42,9 +42,35 @@ export class SchemaParser {
     }
 
     /**
-     * Parse db/schema.rb file
+     * Parse db/schema.rb file with progress indicator
      */
-    async parseSchema(): Promise<DatabaseSchema | null> {
+    async parseSchema(showProgress: boolean = true): Promise<DatabaseSchema | null> {
+        if (!this.workspaceFolder) {
+            return null;
+        }
+
+        if (!showProgress) {
+            // Fast path without progress indicator
+            return this.parseSchemaInternal();
+        }
+
+        // Show progress indicator for potentially long operation
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Parsing database schema...",
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ increment: 0, message: 'Reading schema.rb...' });
+            const result = await this.parseSchemaInternal();
+            progress.report({ increment: 100, message: 'Done!' });
+            return result;
+        });
+    }
+
+    /**
+     * Internal schema parsing implementation
+     */
+    private async parseSchemaInternal(): Promise<DatabaseSchema | null> {
         if (!this.workspaceFolder) {
             return null;
         }

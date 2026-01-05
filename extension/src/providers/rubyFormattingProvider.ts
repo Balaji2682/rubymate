@@ -64,8 +64,61 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
             return [vscode.TextEdit.replace(fullRange, formatted)];
 
         } catch (error) {
-            this.outputChannel.appendLine(`Formatting error: ${error}`);
-            vscode.window.showErrorMessage(`Failed to format Ruby file: ${error}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.outputChannel.appendLine(`Formatting error: ${errorMessage}`);
+
+            // Provide specific, actionable error messages
+            if (errorMessage.includes('rubocop') || errorMessage.includes('not found')) {
+                vscode.window.showErrorMessage(
+                    'RuboCop not found. Install it with: gem install rubocop',
+                    'Install RuboCop',
+                    'Show Docs'
+                ).then(selection => {
+                    if (selection === 'Install RuboCop') {
+                        const terminal = vscode.window.createTerminal('Install RuboCop');
+                        terminal.sendText('gem install rubocop');
+                        terminal.show();
+                    } else if (selection === 'Show Docs') {
+                        vscode.env.openExternal(vscode.Uri.parse('https://docs.rubocop.org/rubocop/installation.html'));
+                    }
+                });
+            } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+                vscode.window.showWarningMessage(
+                    'Formatting timed out after 30 seconds. File may be too large or RuboCop config is slow.',
+                    'Show Output'
+                ).then(selection => {
+                    if (selection === 'Show Output') {
+                        this.outputChannel.show();
+                    }
+                });
+            } else if (errorMessage.includes('ENOENT') || errorMessage.includes('command not found')) {
+                vscode.window.showErrorMessage(
+                    'Ruby or RuboCop executable not found. Check your PATH or rubymate.rubyPath setting.',
+                    'Open Settings',
+                    'Show Output'
+                ).then(selection => {
+                    if (selection === 'Open Settings') {
+                        vscode.commands.executeCommand('workbench.action.openSettings', 'rubymate.rubyPath');
+                    } else if (selection === 'Show Output') {
+                        this.outputChannel.show();
+                    }
+                });
+            } else {
+                // Generic error with helpful actions
+                vscode.window.showErrorMessage(
+                    `Failed to format Ruby file: ${errorMessage}`,
+                    'Show Output',
+                    'Retry'
+                ).then(selection => {
+                    if (selection === 'Show Output') {
+                        this.outputChannel.show();
+                    } else if (selection === 'Retry') {
+                        // Retry formatting
+                        vscode.commands.executeCommand('editor.action.formatDocument');
+                    }
+                });
+            }
+
             return [];
         }
     }

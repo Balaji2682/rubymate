@@ -89,36 +89,104 @@ export class IntelligentIndexer {
         }
 
         this.isIndexing = true;
+
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Indexing Ruby workspace",
+            cancellable: true
+        }, async (progress, token) => {
+            const startTime = Date.now();
+
+            // Add timeout: 5 minutes max
+            const timeoutPromise = new Promise<void>((_, reject) =>
+                setTimeout(() => reject(new Error('Indexing timeout after 5 minutes')), 300000)
+            );
+
+            try {
+                await Promise.race([
+                    this.indexWorkspaceInternal(progress, token),
+                    timeoutPromise
+                ]);
+            } catch (error) {
+                // Graceful degradation
+                this.outputChannel.appendLine(`Indexing failed: ${error}`);
+                if (error instanceof Error && error.message.includes('timeout')) {
+                    vscode.window.showWarningMessage(
+                        'Workspace indexing timed out after 5 minutes. Some features may be limited. Try indexing again or reduce workspace size.',
+                        'Retry'
+                    ).then(selection => {
+                        if (selection === 'Retry') {
+                            this.isIndexing = false;
+                            this.indexWorkspace();
+                        }
+                    });
+                } else {
+                    vscode.window.showWarningMessage(
+                        `Workspace indexing incomplete: ${error instanceof Error ? error.message : String(error)}. Some features may be limited.`
+                    );
+                }
+            } finally {
+                this.isIndexing = false;
+                const duration = Date.now() - startTime;
+                this.outputChannel.appendLine(`Indexing completed in ${duration}ms`);
+            }
+        });
+    }
+
+    /**
+     * Internal indexing implementation with progress reporting
+     */
+    private async indexWorkspaceInternal(
+        progress: vscode.Progress<{ message?: string; increment?: number }>,
+        token: vscode.CancellationToken
+    ): Promise<void> {
         const startTime = Date.now();
 
-        try {
-            // Find all Ruby files
-            const files = await vscode.workspace.findFiles('**/*.rb', '**/node_modules/**');
-            this.outputChannel.appendLine(`Found ${files.length} Ruby files to index`);
+        // Find all Ruby files
+        progress.report({ message: 'Finding Ruby files...' });
+        const files = await vscode.workspace.findFiles('**/*.rb', '**/node_modules/**');
+        this.outputChannel.appendLine(`Found ${files.length} Ruby files to index`);
 
-            // Index in batches to avoid blocking
-            const batchSize = 20;
-            for (let i = 0; i < files.length; i += batchSize) {
-                const batch = files.slice(i, i + batchSize);
-                await Promise.all(batch.map(uri => this.indexFile(uri)));
+        if (token.isCancellationRequested) {
+            this.outputChannel.appendLine('Indexing cancelled by user');
+            return;
+        }
 
-                // Yield to allow UI updates
-                await this.sleep(10);
+        // Index in batches to avoid blocking
+        const batchSize = 20;
+        const totalBatches = Math.ceil(files.length / batchSize);
+        const incrementPerBatch = 100 / totalBatches;
+
+        for (let i = 0; i < files.length; i += batchSize) {
+            if (token.isCancellationRequested) {
+                this.outputChannel.appendLine('Indexing cancelled by user');
+                return;
             }
 
-            // Save cache
-            await this.saveCache();
+            const batch = files.slice(i, i + batchSize);
+            const batchNumber = Math.floor(i / batchSize) + 1;
 
-            const duration = Date.now() - startTime;
-            this.outputChannel.appendLine(`Indexed workspace in ${duration}ms`);
+            progress.report({
+                message: `Indexing batch ${batchNumber}/${totalBatches} (${i + batch.length}/${files.length} files)`,
+                increment: incrementPerBatch
+            });
 
-            // Print statistics
-            const stats = this.getStats();
-            this.outputChannel.appendLine(`Statistics: ${JSON.stringify(stats, null, 2)}`);
+            await Promise.all(batch.map(uri => this.indexFile(uri)));
 
-        } finally {
-            this.isIndexing = false;
+            // Yield to allow UI updates
+            await this.sleep(10);
         }
+
+        // Save cache
+        progress.report({ message: 'Saving cache...' });
+        await this.saveCache();
+
+        const duration = Date.now() - startTime;
+        this.outputChannel.appendLine(`Indexed workspace in ${duration}ms`);
+
+        // Print statistics
+        const stats = this.getStats();
+        this.outputChannel.appendLine(`Statistics: ${JSON.stringify(stats, null, 2)}`);
     }
 
     /**

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SchemaParser, Table } from './schemaParser';
+import { escapeRubyHeredoc } from '../utils/shellEscape';
 
 export class DatabaseCommands {
     private schemaParser: SchemaParser;
@@ -466,11 +467,18 @@ end
             return;
         }
 
+        // SECURITY: Escape the query to prevent SQL/command injection
+        // This prevents malicious queries from breaking out of the heredoc
+        // or executing arbitrary shell commands
+        const escapedQuery = escapeRubyHeredoc(query);
+
         const terminal = vscode.window.createTerminal('SQL Query');
-        terminal.sendText(`rails runner "puts ActiveRecord::Base.connection.execute(<<~SQL).to_a
-${query}
+        // Use single quotes to prevent shell interpretation
+        // The query is safely embedded in a Ruby heredoc with proper escaping
+        terminal.sendText(`rails runner 'query = <<~SQL
+${escapedQuery}
 SQL
-).inspect"`);
+puts ActiveRecord::Base.connection.execute(query).to_a.inspect'`);
         terminal.show();
     }
 

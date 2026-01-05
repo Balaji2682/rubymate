@@ -1,9 +1,9 @@
 # RubyMate - Ultimate Ruby & Rails IDE for VS Code
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/your-publisher.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/your-publisher.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/your-publisher.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate)
-[![License](https://img.shields.io/github/license/your-username/rubymate?style=flat-square)](LICENSE)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/BalajiR.rubymate?style=flat-square&label=version)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![License](https://img.shields.io/github/license/Balaji2682/rubymate?style=flat-square)](https://github.com/Balaji2682/rubymate/blob/main/LICENSE)
 
 **The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings Advanced/Professional IDE-style productivity to VS Code.
 

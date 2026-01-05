@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { startLanguageClient, stopLanguageClient } from './languageClient';
+// NOTE: ruby-lsp integration removed due to compatibility issues
+// Using custom indexers and providers instead (advancedIndexer, intelligentIndexer, etc.)
+// import { startLanguageClient, stopLanguageClient } from './languageClient';
 import { AdvancedRubyIndexer } from './advancedIndexer';
 import { NavigationCommands } from './commands/navigation';
 import { RubyWorkspaceSymbolProvider } from './providers/workspaceSymbolProvider';
@@ -18,6 +20,11 @@ import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
 import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
 import { RubyFormattingProvider } from './providers/rubyFormattingProvider';
 import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rubyAutoEndProvider';
+import { SorbetDiagnostics } from './sorbetDiagnostics';
+import { ConfigValidator } from './configValidator';
+import { StatusBarManager, ExtensionState } from './statusBarManager';
+import { TelemetryManager } from './telemetryManager';
+import { SorbetIntegration } from './sorbetIntegration';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -36,6 +43,19 @@ let testExplorerLoaded = false;
 let debugProvidersLoaded = false;
 let extensionContext: vscode.ExtensionContext; // Store context for lazy loaders
 
+// Configuration validation
+let configValidator: ConfigValidator;
+
+// Status bar
+let statusBarManager: StatusBarManager;
+
+// Telemetry (privacy-respecting)
+let telemetryManager: TelemetryManager;
+
+// Sorbet integration
+let sorbetIntegration: SorbetIntegration;
+let sorbetDiagnostics: SorbetDiagnostics;
+
 // Database features
 let schemaParser: SchemaParser;
 let nPlusOneDetector: NPlusOneDetector;
@@ -51,6 +71,71 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel = vscode.window.createOutputChannel('RubyMate');
     outputChannel.appendLine('RubyMate extension is now active');
 
+    // Initialize status bar (shows initializing state)
+    statusBarManager = new StatusBarManager(outputChannel);
+    context.subscriptions.push(statusBarManager);
+
+    // Initialize telemetry (privacy-respecting, local storage)
+    telemetryManager = new TelemetryManager(context, outputChannel);
+    context.subscriptions.push({
+        dispose: async () => {
+            // FIX: Properly await async dispose
+            await telemetryManager.dispose();
+        }
+    });
+
+    // Initialize Sorbet integration (detects and leverages Sorbet extension)
+    // FIX: Now using async initialize() to prevent race conditions
+    sorbetIntegration = new SorbetIntegration(outputChannel);
+    await sorbetIntegration.initialize(); // FIX: Await initialization
+    sorbetIntegration.showStatus();
+    context.subscriptions.push(sorbetIntegration); // FIX: Add to disposables
+
+    // Initialize Sorbet diagnostics collection
+    sorbetDiagnostics = new SorbetDiagnostics(sorbetIntegration, outputChannel);
+    sorbetDiagnostics.startListening(context);
+    context.subscriptions.push(sorbetDiagnostics);
+
+    // Check Sorbet configuration and prompt setup if needed
+    await sorbetIntegration.promptSorbetSetup();
+
+    // ========== PHASE 0: Configuration Validation (Critical) ==========
+    // Validate configuration before initializing other features
+    configValidator = new ConfigValidator(outputChannel);
+    const validationResult = await configValidator.validateAll();
+
+    // Show validation errors/warnings to user
+    await configValidator.showValidationErrors(validationResult);
+
+    // Don't block activation on validation errors, but log them
+    if (!validationResult.valid) {
+        outputChannel.appendLine('⚠ Extension activated with configuration errors. Some features may not work correctly.');
+    }
+
+    // Watch for configuration changes and re-validate
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(async (event) => {
+            if (event.affectsConfiguration('rubymate')) {
+                outputChannel.appendLine('Configuration changed, re-validating...');
+                configValidator.clearCache(); // Clear cache to force re-validation
+                const newValidationResult = await configValidator.validateAll();
+                await configValidator.showValidationErrors(newValidationResult);
+
+                // If rubyPath changed, suggest reloading window
+                if (event.affectsConfiguration('rubymate.rubyPath') && newValidationResult.valid) {
+                    const selection = await vscode.window.showInformationMessage(
+                        'Ruby path changed. Reload the window for changes to take effect?',
+                        'Reload Window',
+                        'Later'
+                    );
+                    if (selection === 'Reload Window') {
+                        vscode.commands.executeCommand('workbench.action.reloadWindow');
+                    }
+                }
+            }
+        })
+    );
+
     // ========== PHASE 1: Core Features (Immediate) ==========
     // Initialize advanced symbol indexer with persistent caching
     symbolIndexer = new AdvancedRubyIndexer(context, outputChannel);
@@ -59,14 +144,9 @@ export async function activate(context: vscode.ExtensionContext) {
     // Initialize navigation commands (lightweight, core feature)
     navigationCommands = new NavigationCommands(symbolIndexer, outputChannel);
 
-    // Start language server client (essential for Ruby development)
-    try {
-        await startLanguageClient(context, outputChannel);
-        outputChannel.appendLine('Language server started successfully');
-    } catch (error) {
-        outputChannel.appendLine(`Failed to start language server: ${error}`);
-        vscode.window.showErrorMessage('Failed to start RubyMate language server. Please ensure Ruby and required gems are installed.');
-    }
+    // NOTE: ruby-lsp language server integration is disabled
+    // Using custom providers instead due to ruby-lsp compatibility issues
+    // See: advancedIndexer.ts, intelligentIndexer.ts for custom implementation
 
     // Register providers (lightweight)
     registerProviders(context);
@@ -106,8 +186,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // ========== PHASE 4: Workspace Indexing (Background) ==========
     // Index workspace symbols in background (don't block activation)
-    indexWorkspace(context).catch(err => {
+    statusBarManager.setIndexing('Indexing workspace...');
+    telemetryManager.startPerformance('workspace-indexing');
+    indexWorkspace(context).then(() => {
+        telemetryManager.endPerformance('workspace-indexing');
+        statusBarManager.setReady();
+    }).catch(err => {
         outputChannel.appendLine(`Failed to index workspace: ${err}`);
+        telemetryManager.trackError('workspace-indexing-failed', 'indexing', err);
+        statusBarManager.setError('Index failed');
     });
 
     // Watch for file changes to re-index
@@ -121,6 +208,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const activationTime = Date.now() - startTime;
     outputChannel.appendLine(`RubyMate activated in ${activationTime}ms (lazy loading enabled)`);
+
+    // Update status bar with Sorbet type level if available
+    if (sorbetIntegration.isSorbetAvailable()) {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor && activeEditor.document.languageId === 'ruby') {
+            const typeLevel = sorbetIntegration.getSorbetTypeLevel(activeEditor.document);
+            const isConfigured = await sorbetIntegration.isSorbetConfigured();
+            statusBarManager.setSorbetStatus(typeLevel, isConfigured);
+        }
+    }
+
+    // Show temporary success message in status bar
+    statusBarManager.showTemporaryMessage(`Ready! (${activationTime}ms)`, 3000);
 }
 
 // ========== Database Features Initialization ==========
@@ -228,6 +328,22 @@ export async function deactivate() {
         }
 
         // FIX: Add null checks and safe disposal for all resources
+        if (statusBarManager) {
+            try {
+                statusBarManager.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing statusBarManager: ${error}`);
+            }
+        }
+
+        if (configValidator) {
+            try {
+                configValidator.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing configValidator: ${error}`);
+            }
+        }
+
         if (symbolIndexer) {
             try {
                 symbolIndexer.dispose();
@@ -276,12 +392,8 @@ export async function deactivate() {
             }
         }
 
-        // FIX: Safely stop language client with error handling
-        try {
-            await stopLanguageClient();
-        } catch (error) {
-            outputChannel?.appendLine(`Error stopping language client: ${error}`);
-        }
+        // NOTE: Language client integration disabled (ruby-lsp compatibility issues)
+        // No need to stop language client
 
         // Dispose output channel last
         if (outputChannel) {
@@ -393,24 +505,24 @@ function registerProviders(context: vscode.ExtensionContext) {
         vscode.languages.registerDocumentSymbolProvider(rubySelector, documentSymbolProvider)
     );
 
-    // Comprehensive definition provider using our index
+    // Comprehensive definition provider using our index + Sorbet
     // Handles: classes, methods, requires, constants
     // Shows popup when multiple results found (like IDE)
-    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer);
+    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer, sorbetIntegration);
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(rubySelector, rubyDefinitionProvider)
     );
 
     // IDE-like features
 
-    // Find All References (like IDE's Alt+F7)
-    const referenceProvider = new RubyReferenceProvider(symbolIndexer);
+    // Find All References (like IDE's Alt+F7) - combines Sorbet + RubyMate
+    const referenceProvider = new RubyReferenceProvider(symbolIndexer, sorbetIntegration);
     context.subscriptions.push(
         vscode.languages.registerReferenceProvider(rubySelector, referenceProvider)
     );
 
-    // Hover provider for documentation (like IDE's Ctrl+Q)
-    const hoverProvider = new RubyHoverProvider(symbolIndexer);
+    // Hover provider for documentation (like IDE's Ctrl+Q) - enhanced with Sorbet types
+    const hoverProvider = new RubyHoverProvider(symbolIndexer, sorbetIntegration);
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(rubySelector, hoverProvider)
     );
@@ -445,6 +557,30 @@ function registerProviders(context: vscode.ExtensionContext) {
             '\n', ' ' // Trigger on newline and space
         )
     );
+
+    // ========== SORBET INTEGRATION NOTES ==========
+    // Sorbet extension provides its own native LSP providers:
+    // - Autocomplete with type signatures
+    // - Signature help (parameter hints)
+    // - Code actions (quick fixes)
+    // - Diagnostics (type errors)
+    //
+    // RubyMate enhances existing providers with Sorbet integration:
+    // - Hover: Enhanced with Sorbet type info (sorbetIntegration.ts:272-308)
+    // - Definition: Tries Sorbet first, falls back to index (rubyDefinitionProvider.ts:37-51)
+    // - References: Combines Sorbet + RubyMate search (referenceProvider.ts:43-62)
+    //
+    // RubyMate monitors Sorbet status:
+    // - Diagnostics collection (sorbetDiagnostics.ts)
+    // - Configuration detection (sorbetIntegration.ts:361-420)
+    // - Status bar integration (statusBarManager.ts:115-134)
+
+    if (sorbetIntegration.isSorbetAvailable()) {
+        outputChannel.appendLine('[SORBET] Integration active - Using Sorbet extension providers');
+        outputChannel.appendLine('[SORBET] Enhanced: Hover, Definition, References');
+    } else {
+        outputChannel.appendLine('[SORBET] Not available - Using RubyMate-only providers');
+    }
 
     // Format on save (if enabled)
     context.subscriptions.push(
@@ -619,6 +755,39 @@ function registerCommands(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(message, { modal: true });
     });
 
+    // Validate configuration command
+    const validateConfigCommand = vscode.commands.registerCommand('rubymate.validateConfiguration', async () => {
+        outputChannel.show();
+        outputChannel.appendLine('');
+        outputChannel.appendLine('=== Manual Configuration Validation ===');
+        configValidator.clearCache(); // Force fresh validation
+        const result = await configValidator.validateAll();
+        await configValidator.showValidationErrors(result);
+
+        if (result.valid && result.warnings.length === 0) {
+            vscode.window.showInformationMessage('✓ RubyMate configuration is valid!');
+        }
+    });
+
+    // Status bar menu command
+    const statusBarMenuCommand = vscode.commands.registerCommand('rubymate.showStatusBarMenu', async () => {
+        telemetryManager.trackCommand('showStatusBarMenu');
+        await statusBarManager.showQuickMenu();
+    });
+
+    // Telemetry commands
+    const showTelemetryCommand = vscode.commands.registerCommand('rubymate.showTelemetry', () => {
+        telemetryManager.showStatistics();
+    });
+
+    const exportTelemetryCommand = vscode.commands.registerCommand('rubymate.exportTelemetry', async () => {
+        await telemetryManager.exportToFile();
+    });
+
+    const clearTelemetryCommand = vscode.commands.registerCommand('rubymate.clearTelemetry', async () => {
+        await telemetryManager.clearData();
+    });
+
     // Show Rails commands palette
     const showRailsCommandsCommand = vscode.commands.registerCommand('rubymate.rails.showCommands', async () => {
         const commands = [
@@ -656,6 +825,11 @@ function registerCommands(context: vscode.ExtensionContext) {
         startDebuggerCommand,
         reindexCommand,
         showIndexStatsCommand,
+        validateConfigCommand,
+        statusBarMenuCommand,
+        showTelemetryCommand,
+        exportTelemetryCommand,
+        clearTelemetryCommand,
         showRailsCommandsCommand
     );
 }

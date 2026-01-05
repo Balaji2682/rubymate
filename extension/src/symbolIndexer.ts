@@ -14,46 +14,133 @@ export class SymbolIndexer {
     private symbols: Map<string, RubySymbol[]> = new Map();
     private indexing: boolean = false;
     private outputChannel: vscode.OutputChannel;
+    private failedFiles: Map<string, string> = new Map(); // Track failed files and their errors
+    private fileModTimes: Map<string, number> = new Map(); // Track file modification times for incremental indexing
+    private cancellationTokenSource?: vscode.CancellationTokenSource;
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
     }
 
-    async indexWorkspace(): Promise<void> {
+    async indexWorkspace(incremental: boolean = false): Promise<void> {
         if (this.indexing) {
             return;
         }
 
         this.indexing = true;
-        this.symbols.clear();
+        this.cancellationTokenSource = new vscode.CancellationTokenSource();
+        const token = this.cancellationTokenSource.token;
 
-        try {
-            this.outputChannel.appendLine('Indexing Ruby symbols...');
-            const startTime = Date.now();
-
-            // Find all Ruby files
-            const files = await vscode.workspace.findFiles(
-                '**/*.rb',
-                '{**/node_modules/**,**/vendor/**,**/tmp/**,.git/**}'
-            );
-
-            this.outputChannel.appendLine(`Found ${files.length} Ruby files`);
-
-            // Index files in batches to avoid blocking
-            const batchSize = 50;
-            for (let i = 0; i < files.length; i += batchSize) {
-                const batch = files.slice(i, i + batchSize);
-                await Promise.all(batch.map(uri => this.indexFile(uri)));
-            }
-
-            const duration = Date.now() - startTime;
-            const totalSymbols = Array.from(this.symbols.values()).reduce((sum, arr) => sum + arr.length, 0);
-            this.outputChannel.appendLine(`Indexed ${totalSymbols} symbols in ${duration}ms`);
-        } catch (error) {
-            this.outputChannel.appendLine(`Error indexing workspace: ${error}`);
-        } finally {
-            this.indexing = false;
+        if (!incremental) {
+            this.symbols.clear();
         }
+
+        // Show progress notification for potentially long operation
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `${incremental ? 'Incrementally indexing' : 'Indexing'} Ruby symbols...`,
+            cancellable: true
+        }, async (progress, progressToken) => {
+            // Link progress cancellation to our token
+            progressToken.onCancellationRequested(() => {
+                this.cancelIndexing();
+            });
+
+            try {
+                this.outputChannel.appendLine(`${incremental ? 'Incremental indexing' : 'Indexing'} Ruby symbols...`);
+                const startTime = Date.now();
+
+                // Find all Ruby files
+                progress.report({ increment: 0, message: 'Finding Ruby files...' });
+                const files = await vscode.workspace.findFiles(
+                    '**/*.rb',
+                    '{**/node_modules/**,**/vendor/**,**/tmp/**,.git/**}'
+                );
+
+                this.outputChannel.appendLine(`Found ${files.length} Ruby files`);
+
+                // Reduce batch size to 10 to prevent UI blocking
+                const batchSize = 10;
+                const totalBatches = Math.ceil(files.length / batchSize);
+                let skippedCount = 0;
+
+                for (let i = 0; i < files.length; i += batchSize) {
+                    // Check for cancellation
+                    if (token.isCancellationRequested || progressToken.isCancellationRequested) {
+                        this.outputChannel.appendLine('Indexing cancelled by user');
+                        return;
+                    }
+
+                    const batch = files.slice(i, i + batchSize);
+                    const batchNumber = Math.floor(i / batchSize) + 1;
+                    const processed = Math.min(i + batchSize, files.length);
+
+                    // Report progress
+                    const percentComplete = (processed / files.length) * 100;
+                    progress.report({
+                        increment: (100 / totalBatches),
+                        message: `${processed}/${files.length} files (batch ${batchNumber}/${totalBatches})`
+                    });
+
+                    // Use incremental indexing if requested
+                    if (incremental) {
+                        const results = await Promise.all(
+                            batch.map(async uri => {
+                                const wasSkipped = await this.indexFileIncremental(uri);
+                                return wasSkipped;
+                            })
+                        );
+                        skippedCount += results.filter(skipped => skipped).length;
+                    } else {
+                        await Promise.all(batch.map(uri => this.indexFile(uri)));
+                    }
+
+                    // Yield to event loop and force garbage collection hint
+                    await this.yieldAndCleanup();
+                }
+
+                if (incremental && skippedCount > 0) {
+                    this.outputChannel.appendLine(`Skipped ${skippedCount} unchanged files`);
+                }
+
+                const duration = Date.now() - startTime;
+                const totalSymbols = Array.from(this.symbols.values()).reduce((sum, arr) => sum + arr.length, 0);
+                const successCount = files.length - this.failedFiles.size;
+
+                this.outputChannel.appendLine(`Indexed ${totalSymbols} symbols in ${duration}ms`);
+                this.outputChannel.appendLine(`Successfully indexed ${successCount}/${files.length} files`);
+
+                // Report completion
+                progress.report({ increment: 100, message: `Done! ${totalSymbols} symbols indexed` });
+
+                if (this.failedFiles.size > 0) {
+                    this.outputChannel.appendLine(`Failed to index ${this.failedFiles.size} files (see errors above)`);
+
+                    // Show warning if many files failed
+                    if (this.failedFiles.size > files.length * 0.1) { // More than 10% failed
+                        vscode.window.showWarningMessage(
+                            `Failed to index ${this.failedFiles.size} Ruby files. Some features may be limited. Check output for details.`,
+                            'Show Output'
+                        ).then(selection => {
+                            if (selection === 'Show Output') {
+                                this.outputChannel.show();
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                this.outputChannel.appendLine(`Error indexing workspace: ${error}`);
+                vscode.window.showErrorMessage(`Failed to index Ruby workspace: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+                this.indexing = false;
+
+                // Dispose cancellation token
+                if (this.cancellationTokenSource) {
+                    this.cancellationTokenSource.dispose();
+                    this.cancellationTokenSource = undefined;
+                }
+            }
+        });
     }
 
     async indexFile(uri: vscode.Uri): Promise<void> {
@@ -64,8 +151,71 @@ export class SymbolIndexer {
             if (symbols.length > 0) {
                 this.symbols.set(uri.toString(), symbols);
             }
+
+            // Update modification time
+            const stat = await vscode.workspace.fs.stat(uri);
+            this.fileModTimes.set(uri.toString(), stat.mtime);
+
+            // Remove from failed files if it was previously failing
+            if (this.failedFiles.has(uri.toString())) {
+                this.failedFiles.delete(uri.toString());
+            }
         } catch (error) {
-            // Silently skip files that can't be indexed
+            // Log error and track failed file
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.outputChannel.appendLine(`Failed to index ${uri.fsPath}: ${errorMessage}`);
+            this.failedFiles.set(uri.toString(), errorMessage);
+
+            // Continue processing - don't throw, just log
+        }
+    }
+
+    /**
+     * Index file only if it has been modified since last indexing
+     * @returns true if file was skipped (unchanged), false if it was indexed
+     */
+    private async indexFileIncremental(uri: vscode.Uri): Promise<boolean> {
+        try {
+            // Check if file has been modified
+            const stat = await vscode.workspace.fs.stat(uri);
+            const lastModified = this.fileModTimes.get(uri.toString());
+
+            // Skip if file hasn't changed
+            if (lastModified && lastModified >= stat.mtime) {
+                return true; // Skipped
+            }
+
+            // File is new or modified, index it
+            await this.indexFile(uri);
+            return false; // Indexed
+        } catch (error) {
+            // If we can't stat the file, try to index it anyway
+            await this.indexFile(uri);
+            return false; // Attempted to index
+        }
+    }
+
+    /**
+     * Yield to event loop and provide garbage collection hint
+     */
+    private async yieldAndCleanup(): Promise<void> {
+        // Yield to event loop to prevent blocking UI
+        await new Promise(resolve => setImmediate(resolve));
+
+        // Hint to V8 to consider garbage collection
+        // This helps release memory between batches
+        if (global.gc) {
+            global.gc();
+        }
+    }
+
+    /**
+     * Cancel ongoing indexing operation
+     */
+    cancelIndexing(): void {
+        if (this.cancellationTokenSource) {
+            this.cancellationTokenSource.cancel();
+            this.outputChannel.appendLine('Cancellation requested');
         }
     }
 
@@ -303,7 +453,27 @@ export class SymbolIndexer {
         return score;
     }
 
+    getFailedFiles(): Map<string, string> {
+        return new Map(this.failedFiles);
+    }
+
+    clearFailedFiles(): void {
+        this.failedFiles.clear();
+    }
+
     dispose(): void {
+        // Cancel any ongoing indexing
+        this.cancelIndexing();
+
+        // Clean up all maps
         this.symbols.clear();
+        this.failedFiles.clear();
+        this.fileModTimes.clear();
+
+        // Dispose cancellation token
+        if (this.cancellationTokenSource) {
+            this.cancellationTokenSource.dispose();
+            this.cancellationTokenSource = undefined;
+        }
     }
 }

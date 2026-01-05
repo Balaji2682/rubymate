@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { SorbetIntegration } from '../sorbetIntegration';
 
 /**
  * Comprehensive definition provider that handles:
@@ -8,9 +9,13 @@ import { AdvancedRubyIndexer } from '../advancedIndexer';
  * 2. Method navigation
  * 3. Require statement navigation
  * 4. Constant navigation
+ * Integrates with Sorbet for improved accuracy when available
  */
 export class RubyDefinitionProvider implements vscode.DefinitionProvider {
-    constructor(private indexer: AdvancedRubyIndexer) {}
+    constructor(
+        private indexer: AdvancedRubyIndexer,
+        private sorbetIntegration?: SorbetIntegration
+    ) {}
 
     async provideDefinition(
         document: vscode.TextDocument,
@@ -28,6 +33,24 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         const word = document.getText(wordRange);
+
+        // Try Sorbet first for enhanced accuracy (if available and Sorbet signatures present)
+        if (this.sorbetIntegration && this.sorbetIntegration.isSorbetAvailable()) {
+            try {
+                const hasSorbet = await this.sorbetIntegration.hasSorbetSignatures(document);
+                if (hasSorbet) {
+                    const sorbetDefinitions = await this.sorbetIntegration.getDefinition(document, position);
+                    if (sorbetDefinitions && sorbetDefinitions.length > 0) {
+                        return sorbetDefinitions;
+                    }
+                }
+            } catch (error) {
+                // Fall back to RubyMate index
+                console.error('[DEFINITION] Sorbet lookup failed:', error);
+            }
+        }
+
+        // Fall back to RubyMate index-based definition finding
 
         // 1. Try require statement first (handles paths in quotes)
         const requireDef = await this.handleRequireStatement(document, position, lineText);

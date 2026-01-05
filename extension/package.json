@@ -195,6 +195,30 @@
         "icon": "$(graph)"
       },
       {
+        "command": "rubymate.validateConfiguration",
+        "title": "Validate Configuration",
+        "category": "RubyMate",
+        "icon": "$(check)"
+      },
+      {
+        "command": "rubymate.showTelemetry",
+        "title": "Show Usage Statistics",
+        "category": "RubyMate",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "rubymate.exportTelemetry",
+        "title": "Export Telemetry Data",
+        "category": "RubyMate",
+        "icon": "$(export)"
+      },
+      {
+        "command": "rubymate.clearTelemetry",
+        "title": "Clear Telemetry Data",
+        "category": "RubyMate",
+        "icon": "$(trash)"
+      },
+      {
         "command": "rubymate.quickDebug",
         "title": "Quick Debug Current File",
         "category": "RubyMate",
@@ -433,7 +457,7 @@
         "rubymate.enableRubyLSP": {
           "type": "boolean",
           "default": false,
-          "description": "Enable built-in Ruby LSP (DEPRECATED: Install Shopify.ruby-lsp extension instead)"
+          "description": "DEPRECATED: Ruby LSP integration removed due to compatibility issues. RubyMate now uses custom indexers and providers."
         },
         "rubymate.enableSolargraph": {
           "type": "boolean",
@@ -472,8 +496,8 @@
         },
         "rubymate.checkRequiredGems": {
           "type": "boolean",
-          "default": true,
-          "description": "Check for required gems on startup (disable if gems are installed but not detected)"
+          "default": false,
+          "description": "DEPRECATED: No longer needed as ruby-lsp integration was removed"
         },
         "rubymate.enableN1Detection": {
           "type": "boolean",
@@ -687,7 +711,7 @@
     "watch": "node esbuild.js --watch",
     "pretest": "npm run compile && tsc -p ./",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run pretest && mocha out/test/suite/**/*.test.js",
+    "test:unit": "npm run pretest && node ./out/test/runTest.js",
     "package": "npm run compile:prod && vsce package",
     "publish": "npm run compile:prod && vsce publish",
     "analyze": "npm run compile:prod && echo 'Check bundle analysis above'"

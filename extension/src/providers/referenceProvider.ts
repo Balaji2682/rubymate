@@ -1,12 +1,17 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { SorbetIntegration } from '../sorbetIntegration';
 
 /**
  * Provides "Find All References" functionality like IDE Alt+F7
  * Shows all places where a class, method, constant, or variable is used
+ * Integrates with Sorbet for more accurate results when available
  */
 export class RubyReferenceProvider implements vscode.ReferenceProvider {
-    constructor(private indexer: AdvancedRubyIndexer) {}
+    constructor(
+        private indexer: AdvancedRubyIndexer,
+        private sorbetIntegration?: SorbetIntegration
+    ) {}
 
     async provideReferences(
         document: vscode.TextDocument,
@@ -35,64 +40,119 @@ export class RubyReferenceProvider implements vscode.ReferenceProvider {
             async (progress, progressToken) => {
                 const references: vscode.Location[] = [];
 
-                // If context.includeDeclaration is true, include the definition
-                if (context.includeDeclaration) {
-                    const definition = await this.findDefinition(word, document, position);
-                    if (definition) {
-                        references.push(definition);
-                    }
-                }
-
-                // Search through all indexed files
-                const workspaceFolders = vscode.workspace.workspaceFolders;
-                if (!workspaceFolders) {
-                    return references;
-                }
-
-                for (const folder of workspaceFolders) {
-                    const files = await vscode.workspace.findFiles(
-                        new vscode.RelativePattern(folder, '**/*.rb'),
-                        '**/node_modules/**'
-                    );
-
-                    progress.report({
-                        message: `Searching ${files.length} files...`,
-                        increment: 0
-                    });
-
-                    const increment = 100 / files.length;
-                    let processed = 0;
-
-                    for (const fileUri of files) {
-                        if (token.isCancellationRequested || progressToken.isCancellationRequested) {
-                            break;
-                        }
-
-                        try {
-                            const fileDocument = await vscode.workspace.openTextDocument(fileUri);
-                            const locations = this.findWordOccurrences(fileDocument, word, context);
-                            references.push(...locations);
-
-                            processed++;
-                            if (processed % 10 === 0) {
-                                progress.report({
-                                    increment: increment * 10,
-                                    message: `Found ${references.length} references in ${processed}/${files.length} files`
-                                });
+                // Try Sorbet first for enhanced accuracy (if available and Sorbet signatures present)
+                if (this.sorbetIntegration && this.sorbetIntegration.isSorbetAvailable()) {
+                    try {
+                        const hasSorbet = await this.sorbetIntegration.hasSorbetSignatures(document);
+                        if (hasSorbet) {
+                            progress.report({ message: 'Querying Sorbet...' });
+                            const sorbetRefs = await this.sorbetIntegration.getReferences(
+                                document,
+                                position,
+                                context.includeDeclaration
+                            );
+                            if (sorbetRefs && sorbetRefs.length > 0) {
+                                references.push(...sorbetRefs);
                             }
-                        } catch (error) {
-                            // Skip files that can't be read
-                            continue;
                         }
+                    } catch (error) {
+                        // Fall back to RubyMate search
+                        console.error('[REFERENCES] Sorbet lookup failed:', error);
                     }
-
-                    progress.report({
-                        increment: 100,
-                        message: `Found ${references.length} references`
-                    });
                 }
 
-                return references;
+                // Continue with RubyMate's comprehensive search
+                // This complements Sorbet by finding references in non-typed code
+                let timedOut = false;
+
+                // Add timeout: 2 minutes max for reference search
+                const timeoutPromise = new Promise<vscode.Location[]>((resolve) => {
+                    setTimeout(() => {
+                        timedOut = true;
+                        resolve(references); // Return partial results
+                    }, 120000); // 2 minutes
+                });
+
+                // Race between actual search and timeout
+                return Promise.race([
+                    timeoutPromise,
+                    (async () => {
+                        try {
+                            // If context.includeDeclaration is true, include the definition
+                            if (context.includeDeclaration) {
+                                const definition = await this.findDefinition(word, document, position);
+                                if (definition) {
+                                    references.push(definition);
+                                }
+                            }
+
+                            // Search through all indexed files
+                            const workspaceFolders = vscode.workspace.workspaceFolders;
+                            if (!workspaceFolders) {
+                                return references;
+                            }
+
+                            for (const folder of workspaceFolders) {
+                                if (timedOut || token.isCancellationRequested || progressToken.isCancellationRequested) {
+                                    break;
+                                }
+
+                                const files = await vscode.workspace.findFiles(
+                                    new vscode.RelativePattern(folder, '**/*.rb'),
+                                    '**/node_modules/**'
+                                );
+
+                                progress.report({
+                                    message: `Searching ${files.length} files...`,
+                                    increment: 0
+                                });
+
+                                const increment = 100 / files.length;
+                                let processed = 0;
+
+                                for (const fileUri of files) {
+                                    if (timedOut || token.isCancellationRequested || progressToken.isCancellationRequested) {
+                                        break;
+                                    }
+
+                                    try {
+                                        const fileDocument = await vscode.workspace.openTextDocument(fileUri);
+                                        const locations = this.findWordOccurrences(fileDocument, word, context);
+                                        references.push(...locations);
+
+                                        processed++;
+                                        if (processed % 10 === 0) {
+                                            progress.report({
+                                                increment: increment * 10,
+                                                message: `Found ${references.length} references in ${processed}/${files.length} files`
+                                            });
+                                        }
+                                    } catch (error) {
+                                        // Skip files that can't be read
+                                        continue;
+                                    }
+                                }
+
+                                if (timedOut) {
+                                    vscode.window.showWarningMessage(
+                                        `Reference search timed out after 2 minutes. Showing ${references.length} partial results.`
+                                    );
+                                } else {
+                                    progress.report({
+                                        increment: 100,
+                                        message: `Found ${references.length} references`
+                                    });
+                                }
+                            }
+
+                            return references;
+                        } catch (error) {
+                            // Log error but return partial results
+                            console.error(`Error during reference search: ${error}`);
+                            return references;
+                        }
+                    })()
+                ]);
             }
         );
     }

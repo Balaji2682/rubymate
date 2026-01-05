@@ -1,3 +1,23 @@
+/**
+ * DEPRECATED: This file is kept for reference but is no longer used.
+ *
+ * Ruby LSP integration was removed due to compatibility issues.
+ * The extension now uses custom indexers and providers instead:
+ * - advancedIndexer.ts - Advanced symbol indexing with gem support
+ * - intelligentIndexer.ts - Semantic analysis and type inference
+ * - symbolIndexer.ts - Fast symbol indexing
+ * - providers/* - Custom language feature providers
+ *
+ * If you want to re-enable ruby-lsp in the future, uncomment the import
+ * in extension.ts and address the compatibility issues that were encountered.
+ *
+ * Known Issues with ruby-lsp (reason for removal):
+ * - [Document the specific issues you encountered here]
+ * - Integration problems
+ * - Performance issues
+ * - Gem dependency conflicts
+ */
+
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as child_process from 'child_process';
@@ -204,17 +224,49 @@ export async function startLanguageClient(
         // Show success message
         vscode.window.setStatusBarMessage('$(check) RubyMate ready', 3000);
     } catch (error) {
-        outputChannel.appendLine(`Failed to start language client: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Failed to start language client: ${errorMessage}`);
 
-        vscode.window.showErrorMessage(
-            'Failed to start RubyMate language server. Check the output channel for details.',
-            'Show Output',
-            'Retry'
-        ).then(selection => {
+        // Provide specific, actionable error messages
+        let message = 'Failed to start RubyMate language server.';
+        const actions: string[] = ['Show Output', 'Retry'];
+
+        if (errorMessage.includes('ruby-lsp') || errorMessage.includes('gem') || errorMessage.includes('not found')) {
+            message = 'ruby-lsp gem not found. Language server requires this gem to be installed.';
+            actions.push('Install Gem');
+        } else if (errorMessage.includes('bundle') || errorMessage.includes('Gemfile')) {
+            message = 'Failed to start via bundle. Ensure ruby-lsp is in your Gemfile and run bundle install.';
+            actions.push('Open Gemfile');
+        } else if (errorMessage.includes('ENOENT') || errorMessage.includes('command not found')) {
+            message = 'Ruby executable not found. Check your PATH or rubymate.rubyPath setting.';
+            actions.splice(1, 0, 'Open Settings'); // Insert before 'Retry'
+        } else if (errorMessage.includes('timeout')) {
+            message = 'Language server startup timed out. This may indicate a configuration issue.';
+        } else {
+            message += ' Check the output channel for details.';
+        }
+
+        vscode.window.showErrorMessage(message, ...actions).then(selection => {
             if (selection === 'Show Output') {
                 outputChannel.show();
             } else if (selection === 'Retry') {
                 stopLanguageClient().then(() => startLanguageClient(context, outputChannel));
+            } else if (selection === 'Install Gem') {
+                const terminal = vscode.window.createTerminal('Install ruby-lsp');
+                terminal.sendText('gem install ruby-lsp');
+                terminal.show();
+            } else if (selection === 'Open Settings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'rubymate.rubyPath');
+            } else if (selection === 'Open Gemfile') {
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                if (workspaceFolder) {
+                    const gemfilePath = vscode.Uri.joinPath(workspaceFolder.uri, 'Gemfile');
+                    vscode.workspace.openTextDocument(gemfilePath).then(doc => {
+                        vscode.window.showTextDocument(doc);
+                    }, () => {
+                        vscode.window.showWarningMessage('Gemfile not found in workspace');
+                    });
+                }
             }
         });
 
