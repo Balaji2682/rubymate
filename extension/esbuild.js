@@ -13,8 +13,20 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'out/extension.js',
-    external: ['vscode'],
+    external: [
+      'vscode',
+      // Externalize large Node.js built-ins that don't need bundling
+      'typescript',
+    ],
     logLevel: 'info',
+    // Optimization options
+    treeShaking: true,
+    metafile: production, // Generate bundle analysis in production
+    // Remove console.log in production
+    pure: production ? ['console.log'] : [],
+    drop: production ? ['debugger'] : [],
+    // Target modern Node.js for better optimization
+    target: 'node16',
     plugins: [
       /* add to the end of plugins array */
       esbuildProblemMatcherPlugin,
@@ -24,7 +36,17 @@ async function main() {
   if (watch) {
     await ctx.watch();
   } else {
-    await ctx.rebuild();
+    const result = await ctx.rebuild();
+
+    // Log bundle analysis in production
+    if (production && result.metafile) {
+      console.log('\n📊 Bundle Analysis:');
+      const analysis = await esbuild.analyzeMetafile(result.metafile, {
+        verbose: false,
+      });
+      console.log(analysis);
+    }
+
     await ctx.dispose();
   }
 }

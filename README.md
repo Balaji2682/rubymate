@@ -5,7 +5,19 @@
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/your-publisher.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate)
 [![License](https://img.shields.io/github/license/your-username/rubymate?style=flat-square)](LICENSE)
 
-**The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings IntelliJ/RubyMine-style productivity to VS Code.
+**The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings Advanced/Professional IDE-style productivity to VS Code.
+
+## NEW: MCP Server for Claude AI
+
+RubyMate now includes a **Model Context Protocol (MCP) server** that allows Claude AI to work efficiently with your Ruby/Rails projects with **80-95% token savings**!
+
+- 18 specialized tools for Ruby/Rails development
+- Instant symbol search and code navigation
+- Rails-aware component mapping
+- N+1 detection and security scanning
+- Zero configuration needed
+
+[Quick Start Guide](QUICKSTART_MCP.md) | [Full MCP Documentation](mcp-server/README.md) | [Setup Instructions](CLAUDE_DESKTOP_SETUP.md)
 
 ## ✨ Features
 
@@ -16,7 +28,7 @@
 - **Rails-Aware**: ActiveRecord models, associations, route helpers, and more
 - **Smart Merging**: Best suggestions from both language servers
 
-### 🧭 IntelliJ-Style Navigation
+### 🧭 Advanced-Style Navigation
 - **Go to Definition** (`Ctrl+B` / `Ctrl+Click`): Jump to method/class definitions
 - **Go to Class** (`Ctrl+N`): Fuzzy search for any class or module
 - **File Structure** (`Ctrl+F12`): Quick outline view with fuzzy search
@@ -222,17 +234,17 @@ Add to `keybindings.json`:
 | Language Servers | Merged intelligently | Run separately, conflicts |
 | Rails Support | Deep integration | Basic or none |
 | Test Explorer | Native UI | Terminal only |
-| Navigation | IntelliJ-style | Basic LSP only |
+| Navigation | Advanced-style | Basic LSP only |
 | Debugging | Integrated | Separate setup |
 | Maintenance | One extension | Multiple updates |
 
-### vs. RubyMine
+### vs. Professional IDE
 
-| Feature | RubyMate | RubyMine |
+| Feature | RubyMate | Professional IDE |
 |---------|----------|----------|
 | Cost | Free | $249/year |
 | Performance | Lightweight | Heavy IDE |
-| Ecosystem | VS Code extensions | IntelliJ plugins |
+| Ecosystem | VS Code extensions | Advanced plugins |
 | Navigation | ✅ Similar shortcuts | ✅ Excellent |
 | Rails Support | ✅ Comprehensive | ✅ Excellent |
 | Debugging | ✅ Full DAP | ✅ Full |
@@ -288,7 +300,7 @@ Built on top of:
 - [debug](https://github.com/ruby/debug) by Ruby core team
 - [rubocop](https://github.com/rubocop/rubocop) by RuboCop team
 
-Inspired by IntelliJ IDEA and RubyMine.
+Inspired by Advanced IDEA and Professional IDE.
 
 ---
 

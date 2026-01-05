@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { SymbolIndexer } from '../symbolIndexer';
+import { AdvancedRubyIndexer } from '../advancedIndexer';
 
 export class RubyDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
-    private symbolIndexer: SymbolIndexer;
+    private symbolIndexer: AdvancedRubyIndexer;
 
-    constructor(symbolIndexer: SymbolIndexer) {
+    constructor(symbolIndexer: AdvancedRubyIndexer) {
         this.symbolIndexer = symbolIndexer;
     }
 

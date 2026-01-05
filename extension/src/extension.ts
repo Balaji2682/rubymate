@@ -1,47 +1,63 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { startLanguageClient, stopLanguageClient } from './languageClient';
-import { SymbolIndexer } from './symbolIndexer';
+import { AdvancedRubyIndexer } from './advancedIndexer';
 import { NavigationCommands } from './commands/navigation';
-import { RailsCommands } from './commands/rails';
 import { RubyWorkspaceSymbolProvider } from './providers/workspaceSymbolProvider';
 import { RubyDocumentSymbolProvider } from './providers/documentSymbolProvider';
-import { RubyDebugConfigurationProvider, RubyDebugAdapterDescriptorFactory, DebugSessionManager } from './debugAdapter';
-import { RubyTestExplorer } from './testExplorer';
+import { SchemaParser } from './database/schemaParser';
+import { SQLCompletionProvider, ActiveRecordCompletionProvider } from './database/sqlCompletionProvider';
+import { NPlusOneDetector } from './database/n+1Detector';
+import { DatabaseCommands } from './database/databaseCommands';
+import { IntelligentIndexer } from './indexing/intelligentIndexer';
+import { IntelligentNavigationCommands } from './commands/intelligentNavigation';
+import { RubyDefinitionProvider } from './providers/rubyDefinitionProvider';
+import { RubyReferenceProvider } from './providers/referenceProvider';
+import { RubyHoverProvider } from './providers/hoverProvider';
+import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
+import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
+
+// Lazy-loaded imports (loaded on-demand)
+// import { RailsCommands } from './commands/rails'; // Lazy loaded
+// import { RubyTestExplorer } from './testExplorer'; // Lazy loaded
+// import { RubyDebugConfigurationProvider, RubyDebugAdapterDescriptorFactory, DebugSessionManager } from './debugAdapter'; // Lazy loaded
 
 let outputChannel: vscode.OutputChannel;
-let symbolIndexer: SymbolIndexer;
+let symbolIndexer: AdvancedRubyIndexer;
 let navigationCommands: NavigationCommands;
-let railsCommands: RailsCommands;
-let debugSessionManager: DebugSessionManager;
+let railsCommands: any; // Lazy loaded
+let debugSessionManager: any; // Lazy loaded
 let railsStatusBar: vscode.StatusBarItem;
-let testExplorer: RubyTestExplorer;
+let testExplorer: any; // Lazy loaded
+let railsCommandsLoaded = false;
+let testExplorerLoaded = false;
+let debugProvidersLoaded = false;
+let extensionContext: vscode.ExtensionContext; // Store context for lazy loaders
+
+// Database features
+let schemaParser: SchemaParser;
+let nPlusOneDetector: NPlusOneDetector;
+let databaseCommands: DatabaseCommands;
+
+// Intelligent indexing
+let intelligentIndexer: IntelligentIndexer;
+let intelligentNavigationCommands: IntelligentNavigationCommands;
 
 export async function activate(context: vscode.ExtensionContext) {
+    const startTime = Date.now();
+    extensionContext = context; // Store for lazy loaders
     outputChannel = vscode.window.createOutputChannel('RubyMate');
     outputChannel.appendLine('RubyMate extension is now active');
 
-    // Initialize symbol indexer
-    symbolIndexer = new SymbolIndexer(outputChannel);
+    // ========== PHASE 1: Core Features (Immediate) ==========
+    // Initialize advanced symbol indexer with persistent caching
+    symbolIndexer = new AdvancedRubyIndexer(context, outputChannel);
+    await symbolIndexer.initialize(); // Load cache from disk
 
-    // Initialize navigation commands
+    // Initialize navigation commands (lightweight, core feature)
     navigationCommands = new NavigationCommands(symbolIndexer, outputChannel);
 
-    // Initialize Rails commands
-    railsCommands = new RailsCommands(outputChannel);
-
-    // Check if this is a Rails project and show status bar
-    const isRailsProject = await checkRailsProject();
-    if (isRailsProject) {
-        railsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-        railsStatusBar.text = '$(ruby) Rails';
-        railsStatusBar.tooltip = 'Ruby on Rails project detected';
-        railsStatusBar.command = 'rubymate.rails.showCommands';
-        railsStatusBar.show();
-        context.subscriptions.push(railsStatusBar);
-    }
-
-    // Start language server client
+    // Start language server client (essential for Ruby development)
     try {
         await startLanguageClient(context, outputChannel);
         outputChannel.appendLine('Language server started successfully');
@@ -50,29 +66,47 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Failed to start RubyMate language server. Please ensure Ruby and required gems are installed.');
     }
 
-    // Register providers
+    // Register providers (lightweight)
     registerProviders(context);
 
-    // Register debug providers
-    registerDebugProviders(context);
-
-    // Register commands
+    // Register core commands (lightweight)
     registerCommands(context);
     navigationCommands.registerCommands(context);
 
-    // Register Rails commands if Rails project
+    // ========== DATABASE FEATURES ==========
+    // Initialize database features (Rails projects)
+    await initializeDatabaseFeatures(context);
+
+    // ========== INTELLIGENT INDEXING ==========
+    // Initialize intelligent semantic indexer
+    await initializeIntelligentIndexing(context);
+
+    // ========== PHASE 2: Rails Features (Lazy - if Rails project) ==========
+    const isRailsProject = await checkRailsProject();
     if (isRailsProject) {
-        railsCommands.registerCommands(context);
-        outputChannel.appendLine('Rails commands registered');
+        // Show status bar immediately
+        railsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+        railsStatusBar.text = '$(ruby) Rails';
+        railsStatusBar.tooltip = 'Ruby on Rails project detected';
+        railsStatusBar.command = 'rubymate.rails.showCommands';
+        railsStatusBar.show();
+        context.subscriptions.push(railsStatusBar);
+
+        // Load Rails commands in background (don't await - loads asynchronously)
+        loadRailsCommandsAsync(context).catch(err => {
+            outputChannel.appendLine(`Failed to load Rails commands: ${err}`);
+        });
     }
 
-    // Initialize test explorer
-    testExplorer = new RubyTestExplorer(outputChannel);
-    context.subscriptions.push(testExplorer);
-    outputChannel.appendLine('Test explorer initialized');
+    // ========== PHASE 3: Debug Providers (Lazy - on first debug) ==========
+    // Register debug providers lazily (will be loaded when debugging starts)
+    registerDebugProvidersLazy(context);
 
-    // Index workspace symbols
-    indexWorkspace(context);
+    // ========== PHASE 4: Workspace Indexing (Background) ==========
+    // Index workspace symbols in background (don't block activation)
+    indexWorkspace(context).catch(err => {
+        outputChannel.appendLine(`Failed to index workspace: ${err}`);
+    });
 
     // Watch for file changes to re-index
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.rb');
@@ -83,7 +117,105 @@ export async function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(watcher);
 
-    outputChannel.appendLine('All RubyMate features initialized');
+    const activationTime = Date.now() - startTime;
+    outputChannel.appendLine(`RubyMate activated in ${activationTime}ms (lazy loading enabled)`);
+}
+
+// ========== Database Features Initialization ==========
+
+async function initializeDatabaseFeatures(context: vscode.ExtensionContext): Promise<void> {
+    try {
+        // Initialize schema parser
+        schemaParser = new SchemaParser(outputChannel);
+        await schemaParser.parseSchema();
+
+        // Initialize N+1 detector
+        nPlusOneDetector = new NPlusOneDetector(schemaParser);
+
+        // Initialize database commands
+        databaseCommands = new DatabaseCommands(schemaParser, outputChannel);
+        databaseCommands.registerCommands(context);
+
+        // Register SQL completion provider
+        const sqlCompletionProvider = new SQLCompletionProvider(schemaParser);
+        context.subscriptions.push(
+            vscode.languages.registerCompletionItemProvider(
+                { language: 'ruby' },
+                sqlCompletionProvider,
+                '"', "'", '.', ' '
+            )
+        );
+
+        // Register ActiveRecord completion provider
+        const activeRecordCompletionProvider = new ActiveRecordCompletionProvider(schemaParser);
+        context.subscriptions.push(
+            vscode.languages.registerCompletionItemProvider(
+                { language: 'ruby' },
+                activeRecordCompletionProvider,
+                ':', ' ', '('
+            )
+        );
+
+        // Enable N+1 query detection on open and save
+        context.subscriptions.push(
+            vscode.workspace.onDidOpenTextDocument(doc => {
+                if (doc.languageId === 'ruby') {
+                    nPlusOneDetector.analyzeDocument(doc);
+                }
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.workspace.onDidSaveTextDocument(doc => {
+                if (doc.languageId === 'ruby') {
+                    nPlusOneDetector.analyzeDocument(doc);
+                }
+            })
+        );
+
+        // Analyze all open documents
+        vscode.workspace.textDocuments.forEach(doc => {
+            if (doc.languageId === 'ruby') {
+                nPlusOneDetector.analyzeDocument(doc);
+            }
+        });
+
+        outputChannel.appendLine('Database features initialized');
+    } catch (error) {
+        outputChannel.appendLine(`Database features not available: ${error}`);
+    }
+}
+
+// ========== Intelligent Indexing Initialization ==========
+
+async function initializeIntelligentIndexing(context: vscode.ExtensionContext): Promise<void> {
+    try {
+        // Initialize intelligent indexer
+        intelligentIndexer = new IntelligentIndexer(context, schemaParser, outputChannel);
+        await intelligentIndexer.initialize();
+
+        // Initialize navigation commands
+        intelligentNavigationCommands = new IntelligentNavigationCommands(intelligentIndexer, outputChannel);
+        intelligentNavigationCommands.registerCommands(context);
+
+        // Start indexing workspace in background
+        intelligentIndexer.indexWorkspace().catch(err => {
+            outputChannel.appendLine(`Failed to index workspace: ${err}`);
+        });
+
+        // Watch for file changes
+        context.subscriptions.push(
+            vscode.workspace.onDidSaveTextDocument(async doc => {
+                if (doc.languageId === 'ruby') {
+                    await intelligentIndexer.indexFile(doc.uri);
+                }
+            })
+        );
+
+        outputChannel.appendLine('Intelligent indexing initialized');
+    } catch (error) {
+        outputChannel.appendLine(`Intelligent indexing not available: ${error}`);
+    }
 }
 
 export async function deactivate() {
@@ -107,7 +239,75 @@ export async function deactivate() {
         testExplorer.dispose();
     }
 
+    if (nPlusOneDetector) {
+        nPlusOneDetector.dispose();
+    }
+
+    if (intelligentIndexer) {
+        intelligentIndexer.dispose();
+    }
+
     await stopLanguageClient();
+}
+
+// ========== Lazy Loading Functions ==========
+
+async function loadRailsCommandsAsync(context: vscode.ExtensionContext): Promise<void> {
+    if (railsCommandsLoaded) {
+        return;
+    }
+
+    outputChannel.appendLine('Loading Rails commands...');
+    const { RailsCommands } = await import('./commands/rails');
+    railsCommands = new RailsCommands(outputChannel);
+    railsCommands.registerCommands(context);
+    railsCommandsLoaded = true;
+    outputChannel.appendLine('Rails commands loaded');
+}
+
+async function ensureTestExplorerLoaded(context: vscode.ExtensionContext): Promise<void> {
+    if (testExplorerLoaded) {
+        return;
+    }
+
+    outputChannel.appendLine('Loading test explorer...');
+    const { RubyTestExplorer } = await import('./testExplorer');
+    testExplorer = new RubyTestExplorer(outputChannel);
+    context.subscriptions.push(testExplorer);
+    testExplorerLoaded = true;
+    outputChannel.appendLine('Test explorer loaded');
+}
+
+async function ensureDebugProvidersLoaded(context: vscode.ExtensionContext): Promise<void> {
+    if (debugProvidersLoaded) {
+        return;
+    }
+
+    outputChannel.appendLine('Loading debug providers...');
+    const {
+        RubyDebugConfigurationProvider,
+        RubyDebugAdapterDescriptorFactory,
+        DebugSessionManager
+    } = await import('./debugAdapter');
+
+    // Debug configuration provider
+    const debugConfigProvider = new RubyDebugConfigurationProvider(outputChannel);
+    context.subscriptions.push(
+        vscode.debug.registerDebugConfigurationProvider('ruby', debugConfigProvider)
+    );
+
+    // Debug adapter descriptor factory
+    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel);
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
+    );
+
+    // Debug session manager
+    debugSessionManager = new DebugSessionManager(outputChannel);
+    debugSessionManager.register(context);
+
+    debugProvidersLoaded = true;
+    outputChannel.appendLine('Debug providers loaded');
 }
 
 async function checkRailsProject(): Promise<boolean> {
@@ -136,6 +336,8 @@ async function checkRailsProject(): Promise<boolean> {
 }
 
 function registerProviders(context: vscode.ExtensionContext) {
+    const rubySelector = { language: 'ruby' };
+
     // Workspace symbol provider for Ctrl+T / Cmd+T
     const workspaceSymbolProvider = new RubyWorkspaceSymbolProvider(symbolIndexer);
     context.subscriptions.push(
@@ -145,33 +347,76 @@ function registerProviders(context: vscode.ExtensionContext) {
     // Document symbol provider for outline and breadcrumbs
     const documentSymbolProvider = new RubyDocumentSymbolProvider(symbolIndexer);
     context.subscriptions.push(
-        vscode.languages.registerDocumentSymbolProvider(
-            { language: 'ruby' },
-            documentSymbolProvider
-        )
+        vscode.languages.registerDocumentSymbolProvider(rubySelector, documentSymbolProvider)
     );
 
-    outputChannel.appendLine('Symbol providers registered');
+    // Comprehensive definition provider using our index
+    // Handles: classes, methods, requires, constants
+    // Shows popup when multiple results found (like IDE)
+    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer);
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(rubySelector, rubyDefinitionProvider)
+    );
+
+    // IDE-like features
+
+    // Find All References (like IDE's Alt+F7)
+    const referenceProvider = new RubyReferenceProvider(symbolIndexer);
+    context.subscriptions.push(
+        vscode.languages.registerReferenceProvider(rubySelector, referenceProvider)
+    );
+
+    // Hover provider for documentation (like IDE's Ctrl+Q)
+    const hoverProvider = new RubyHoverProvider(symbolIndexer);
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider(rubySelector, hoverProvider)
+    );
+
+    // Type Hierarchy (like IDE's Ctrl+H)
+    const typeHierarchyProvider = new RubyTypeHierarchyProvider(symbolIndexer);
+    context.subscriptions.push(
+        vscode.languages.registerTypeHierarchyProvider(rubySelector, typeHierarchyProvider)
+    );
+
+    // Call Hierarchy (like IDE's Ctrl+Alt+H)
+    const callHierarchyProvider = new RubyCallHierarchyProvider(symbolIndexer);
+    context.subscriptions.push(
+        vscode.languages.registerCallHierarchyProvider(rubySelector, callHierarchyProvider)
+    );
+
+    outputChannel.appendLine('✓ Navigation providers registered');
+    outputChannel.appendLine('  - Go to Definition (F12) - with multi-result popup');
+    outputChannel.appendLine('  - Find All References (Shift+F12)');
+    outputChannel.appendLine('  - Type Hierarchy (shows class inheritance)');
+    outputChannel.appendLine('  - Call Hierarchy (shows method calls)');
+    outputChannel.appendLine('  - Hover for Documentation');
 }
 
-function registerDebugProviders(context: vscode.ExtensionContext) {
-    // Debug configuration provider
-    const debugConfigProvider = new RubyDebugConfigurationProvider(outputChannel);
+function registerDebugProvidersLazy(context: vscode.ExtensionContext) {
+    // Create lightweight proxy providers that load the real ones on first use
+    const lazyDebugConfigProvider: vscode.DebugConfigurationProvider = {
+        async resolveDebugConfiguration(folder, config, token) {
+            await ensureDebugProvidersLoaded(context);
+            return config;
+        }
+    };
+
+    const lazyDebugAdapterFactory: vscode.DebugAdapterDescriptorFactory = {
+        async createDebugAdapterDescriptor(session, executable) {
+            await ensureDebugProvidersLoaded(context);
+            // The real factory is now loaded, return undefined to use it
+            return undefined;
+        }
+    };
+
     context.subscriptions.push(
-        vscode.debug.registerDebugConfigurationProvider('ruby', debugConfigProvider)
+        vscode.debug.registerDebugConfigurationProvider('ruby', lazyDebugConfigProvider)
+    );
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', lazyDebugAdapterFactory)
     );
 
-    // Debug adapter descriptor factory
-    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel);
-    context.subscriptions.push(
-        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
-    );
-
-    // Debug session manager
-    debugSessionManager = new DebugSessionManager(outputChannel);
-    debugSessionManager.register(context);
-
-    outputChannel.appendLine('Debug providers registered');
+    outputChannel.appendLine('Debug providers registered (lazy loading enabled)');
 }
 
 async function indexWorkspace(context: vscode.ExtensionContext) {
@@ -254,7 +499,27 @@ function registerCommands(context: vscode.ExtensionContext) {
     // Re-index workspace command
     const reindexCommand = vscode.commands.registerCommand('rubymate.reindexWorkspace', async () => {
         await indexWorkspace(context);
-        vscode.window.showInformationMessage('RubyMate: Workspace re-indexed');
+        const stats = symbolIndexer.getStats();
+        vscode.window.showInformationMessage(
+            `RubyMate: Indexed ${stats.totalSymbols} symbols in ${stats.indexedFiles} files`
+        );
+    });
+
+    // Show index statistics command
+    const showIndexStatsCommand = vscode.commands.registerCommand('rubymate.showIndexStats', () => {
+        const stats = symbolIndexer.getStats();
+        const message = [
+            `**RubyMate Index Statistics**`,
+            ``,
+            `Total Files: ${stats.totalFiles}`,
+            `Indexed Files: ${stats.indexedFiles}`,
+            `Total Symbols: ${stats.totalSymbols}`,
+            `Gem Files: ${stats.gemFiles}`,
+            ``,
+            `Average: ${(stats.totalSymbols / stats.indexedFiles).toFixed(1)} symbols/file`
+        ].join('\n');
+
+        vscode.window.showInformationMessage(message, { modal: true });
     });
 
     // Show Rails commands palette
@@ -293,6 +558,7 @@ function registerCommands(context: vscode.ExtensionContext) {
         runTestFileCommand,
         startDebuggerCommand,
         reindexCommand,
+        showIndexStatsCommand,
         showRailsCommandsCommand
     );
 }

@@ -59,41 +59,55 @@ export async function startLanguageClient(
 
     outputChannel.appendLine(`Ruby version: ${rubyCheck.version}`);
 
-    // Check for required gems
-    const gemsCheck = await verifyRequiredGems(rubyPath, workspaceFolder.uri.fsPath, outputChannel);
-    if (!gemsCheck.success) {
-        const missingGems = gemsCheck.missing.join(', ');
-        vscode.window.showWarningMessage(
-            `Missing required gems: ${missingGems}. Some features may not work.`,
-            'Install Gems',
-            'Show Instructions'
-        ).then(selection => {
-            if (selection === 'Install Gems') {
-                const terminal = vscode.window.createTerminal('Bundle Install');
-                terminal.sendText('bundle install');
-                terminal.show();
-            } else if (selection === 'Show Instructions') {
-                vscode.env.openExternal(vscode.Uri.parse('https://github.com/your-username/rubymate#installation'));
+    // Check for required gems (non-blocking)
+    if (config.get<boolean>('checkRequiredGems', true)) {
+        const gemsCheck = await verifyRequiredGems(rubyPath, workspaceFolder.uri.fsPath, outputChannel);
+        if (!gemsCheck.success && gemsCheck.missing.length > 0) {
+            const missingGems = gemsCheck.missing.join(', ');
+            outputChannel.appendLine(`⚠ Some gems not detected: ${missingGems}`);
+            outputChannel.appendLine('💡 If gems are installed but not detected, try:');
+            outputChannel.appendLine('   - Reload VS Code window (Cmd/Ctrl+Shift+P → "Reload Window")');
+            outputChannel.appendLine('   - Check gems are in Gemfile: bundle list');
+            outputChannel.appendLine('   - Or disable check: "rubymate.checkRequiredGems": false');
+
+            // Only show popup once per session
+            const key = 'rubymate.gemsWarningShown';
+            if (!context.globalState.get(key)) {
+                context.globalState.update(key, true);
+                vscode.window.showWarningMessage(
+                    `RubyMate: ${missingGems} not detected. Features may be limited.`,
+                    'Install via Bundle',
+                    'Dismiss'
+                ).then(selection => {
+                    if (selection === 'Install via Bundle') {
+                        const terminal = vscode.window.createTerminal('Bundle Install');
+                        terminal.sendText('bundle add ruby-lsp solargraph --group development');
+                        terminal.sendText('bundle install');
+                        terminal.show();
+                    }
+                });
             }
-        });
+        }
     }
 
-    // Server options - use ruby-lsp gem
+    // Server options - use ruby-lsp gem via bundle exec
     const serverOptions: ServerOptions = {
         run: {
-            command: rubyPath,
-            args: ['-W0', '-I', 'lib', '-rbundler/setup', '-rruby_lsp', '-e', 'RubyLsp::Server.new.start'],
+            command: 'bundle',
+            args: ['exec', 'ruby-lsp'],
             transport: TransportKind.stdio,
             options: {
-                cwd: workspaceFolder.uri.fsPath
+                cwd: workspaceFolder.uri.fsPath,
+                shell: true
             }
         },
         debug: {
-            command: rubyPath,
-            args: ['-W0', '-I', 'lib', '-rbundler/setup', '-rruby_lsp', '-e', 'RubyLsp::Server.new.start'],
+            command: 'bundle',
+            args: ['exec', 'ruby-lsp'],
             transport: TransportKind.stdio,
             options: {
-                cwd: workspaceFolder.uri.fsPath
+                cwd: workspaceFolder.uri.fsPath,
+                shell: true
             }
         }
     };
@@ -240,7 +254,10 @@ function validateConfiguration(config: vscode.WorkspaceConfiguration, outputChan
 
 async function verifyRubyInstallation(rubyPath: string, outputChannel: vscode.OutputChannel): Promise<{ success: boolean; version?: string }> {
     return new Promise((resolve) => {
-        child_process.exec(`"${rubyPath}" --version`, (error, stdout, stderr) => {
+        child_process.exec(`${rubyPath} --version`, {
+            shell: process.env.SHELL || '/bin/bash',
+            env: process.env  // Inherit environment from shell (includes rbenv/rvm paths)
+        }, (error, stdout, stderr) => {
             if (error) {
                 outputChannel.appendLine(`Ruby verification failed: ${error.message}`);
                 outputChannel.appendLine(`stderr: ${stderr}`);
@@ -272,16 +289,53 @@ async function verifyRequiredGems(rubyPath: string, workspacePath: string, outpu
 
 async function checkGemInstalled(rubyPath: string, gemName: string, workspacePath: string, outputChannel: vscode.OutputChannel): Promise<boolean> {
     return new Promise((resolve) => {
-        const command = `"${rubyPath}" -e "require 'bundler'; Bundler.require; require '${gemName}'"`;
+        // Try multiple methods to detect the gem
 
-        child_process.exec(command, { cwd: workspacePath }, (error, stdout, stderr) => {
-            if (error) {
-                outputChannel.appendLine(`Gem '${gemName}' check failed (this is okay if using system gems)`);
-                resolve(false);
-            } else {
-                outputChannel.appendLine(`Gem '${gemName}' is available`);
+        // Method 1: Try bundle list (respects Gemfile)
+        const bundleCommand = `bundle list | grep -i "${gemName}"`;
+
+        child_process.exec(bundleCommand, {
+            cwd: workspacePath,
+            shell: process.env.SHELL || '/bin/bash',  // Use user's shell
+            env: process.env  // Inherit all environment variables
+        }, (bundleError, bundleStdout) => {
+            if (!bundleError && bundleStdout.includes(gemName)) {
+                outputChannel.appendLine(`✓ Gem '${gemName}' found via bundle`);
                 resolve(true);
+                return;
             }
+
+            // Method 2: Try gem list (checks installed gems)
+            const gemListCommand = `gem list "^${gemName}$" -i`;
+
+            child_process.exec(gemListCommand, {
+                cwd: workspacePath,
+                shell: process.env.SHELL || '/bin/bash',
+                env: process.env
+            }, (gemError, gemStdout) => {
+                if (!gemError && gemStdout.trim() === 'true') {
+                    outputChannel.appendLine(`✓ Gem '${gemName}' found via gem list`);
+                    resolve(true);
+                    return;
+                }
+
+                // Method 3: Try requiring via ruby (last resort)
+                const requireCommand = `${rubyPath} -e "begin; require '${gemName.replace('-', '/')}'; puts 'true'; rescue LoadError; puts 'false'; end"`;
+
+                child_process.exec(requireCommand, {
+                    cwd: workspacePath,
+                    shell: process.env.SHELL || '/bin/bash',
+                    env: process.env
+                }, (requireError, requireStdout) => {
+                    if (!requireError && requireStdout.trim() === 'true') {
+                        outputChannel.appendLine(`✓ Gem '${gemName}' can be required`);
+                        resolve(true);
+                    } else {
+                        outputChannel.appendLine(`✗ Gem '${gemName}' not found (tried bundle, gem list, and require)`);
+                        resolve(false);
+                    }
+                });
+            });
         });
     });
 }

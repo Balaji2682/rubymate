@@ -1,5 +1,8 @@
 # VS Code Extension Packaging - Exclude from VSIX
 
+# Parent directory files - exclude everything from parent
+../**
+
 # Source files
 src/**
 **/*.ts

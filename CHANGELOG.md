@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Ruby LSP support for modern Ruby features
   - Solargraph integration for YARD documentation
   - Intelligent completion merging from both servers
-- 🧭 **IntelliJ-Style Navigation**
+- 🧭 **Advanced-Style Navigation**
   - Go to Definition (`Ctrl+B`, `Ctrl+Click`)
   - Go to Class (`Ctrl+N`) with fuzzy search
   - File Structure (`Ctrl+F12`) with symbol outline
@@ -98,7 +98,7 @@ RubyMate brings a unified, comprehensive Ruby and Rails development experience t
 
 **Highlights:**
 - ✨ Combines Ruby LSP + Solargraph for the best completions
-- 🎯 IntelliJ/RubyMine-style shortcuts work out of the box
+- 🎯 Advanced/Professional IDE-style shortcuts work out of the box
 - 🚂 Deep Rails integration with smart navigation
 - 🐛 Full debugging support with official debug gem
 - 🧪 Native test explorer for RSpec and Minitest
