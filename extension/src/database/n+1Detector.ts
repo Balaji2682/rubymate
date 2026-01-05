@@ -12,6 +12,9 @@ export interface N1Issue {
 export class NPlusOneDetector {
     private schemaParser: SchemaParser;
     private diagnosticCollection: vscode.DiagnosticCollection;
+    // FIX: Add debounce timer to prevent excessive analysis
+    private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
+    private readonly DEBOUNCE_DELAY = 500; // ms
 
     constructor(schemaParser: SchemaParser) {
         this.schemaParser = schemaParser;
@@ -19,9 +22,31 @@ export class NPlusOneDetector {
     }
 
     /**
-     * Analyze document for N+1 queries
+     * Analyze document for N+1 queries (with debouncing)
      */
     async analyzeDocument(document: vscode.TextDocument): Promise<void> {
+        // FIX: Debounce analysis to prevent analyzing on every keystroke
+        const uri = document.uri.toString();
+
+        // Clear existing timer for this document
+        const existingTimer = this.debounceTimers.get(uri);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+        }
+
+        // Set new timer
+        const timer = setTimeout(async () => {
+            this.debounceTimers.delete(uri);
+            await this.analyzeDocumentInternal(document);
+        }, this.DEBOUNCE_DELAY);
+
+        this.debounceTimers.set(uri, timer);
+    }
+
+    /**
+     * FIX: Internal analysis method (debounced)
+     */
+    private async analyzeDocumentInternal(document: vscode.TextDocument): Promise<void> {
         if (document.languageId !== 'ruby') {
             return;
         }
@@ -465,6 +490,12 @@ export class NPlusOneDetector {
      * Dispose
      */
     dispose(): void {
+        // FIX: Clear all debounce timers on disposal
+        for (const timer of this.debounceTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.debounceTimers.clear();
+
         this.diagnosticCollection.dispose();
     }
 }

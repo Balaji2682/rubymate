@@ -487,6 +487,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "rubymate.autoInsertEnd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically insert 'end' keyword when creating Ruby blocks (def, class, if, etc.)"
         }
       }
     },
@@ -680,6 +685,9 @@
     "compile": "node esbuild.js",
     "compile:prod": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
+    "pretest": "npm run compile && tsc -p ./",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "npm run pretest && mocha out/test/suite/**/*.test.js",
     "package": "npm run compile:prod && vsce package",
     "publish": "npm run compile:prod && vsce publish",
     "analyze": "npm run compile:prod && echo 'Check bundle analysis above'"
@@ -690,10 +698,17 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^2.22.0",
+    "chai": "^6.2.2",
     "esbuild": "0.25.0",
+    "glob": "^13.0.0",
+    "mocha": "^11.7.5",
     "typescript": "^5.3.3"
   },
   "repository": {

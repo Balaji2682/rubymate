@@ -16,6 +16,8 @@ import { RubyReferenceProvider } from './providers/referenceProvider';
 import { RubyHoverProvider } from './providers/hoverProvider';
 import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
 import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
+import { RubyFormattingProvider } from './providers/rubyFormattingProvider';
+import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rubyAutoEndProvider';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -219,35 +221,76 @@ async function initializeIntelligentIndexing(context: vscode.ExtensionContext): 
 }
 
 export async function deactivate() {
-    if (outputChannel) {
-        outputChannel.appendLine('RubyMate extension is deactivating');
-    }
+    // FIX: Add try-catch to prevent deactivation failures
+    try {
+        if (outputChannel) {
+            outputChannel.appendLine('RubyMate extension is deactivating');
+        }
 
-    if (symbolIndexer) {
-        symbolIndexer.dispose();
-    }
+        // FIX: Add null checks and safe disposal for all resources
+        if (symbolIndexer) {
+            try {
+                symbolIndexer.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing symbolIndexer: ${error}`);
+            }
+        }
 
-    if (debugSessionManager) {
-        debugSessionManager.dispose();
-    }
+        if (debugSessionManager) {
+            try {
+                debugSessionManager.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing debugSessionManager: ${error}`);
+            }
+        }
 
-    if (railsStatusBar) {
-        railsStatusBar.dispose();
-    }
+        if (railsStatusBar) {
+            try {
+                railsStatusBar.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing railsStatusBar: ${error}`);
+            }
+        }
 
-    if (testExplorer) {
-        testExplorer.dispose();
-    }
+        if (testExplorer) {
+            try {
+                testExplorer.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing testExplorer: ${error}`);
+            }
+        }
 
-    if (nPlusOneDetector) {
-        nPlusOneDetector.dispose();
-    }
+        if (nPlusOneDetector) {
+            try {
+                nPlusOneDetector.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing nPlusOneDetector: ${error}`);
+            }
+        }
 
-    if (intelligentIndexer) {
-        intelligentIndexer.dispose();
-    }
+        if (intelligentIndexer) {
+            try {
+                intelligentIndexer.dispose();
+            } catch (error) {
+                outputChannel?.appendLine(`Error disposing intelligentIndexer: ${error}`);
+            }
+        }
 
-    await stopLanguageClient();
+        // FIX: Safely stop language client with error handling
+        try {
+            await stopLanguageClient();
+        } catch (error) {
+            outputChannel?.appendLine(`Error stopping language client: ${error}`);
+        }
+
+        // Dispose output channel last
+        if (outputChannel) {
+            outputChannel.appendLine('RubyMate extension deactivated successfully');
+            outputChannel.dispose();
+        }
+    } catch (error) {
+        console.error('Critical error during deactivation:', error);
+    }
 }
 
 // ========== Lazy Loading Functions ==========
@@ -384,12 +427,66 @@ function registerProviders(context: vscode.ExtensionContext) {
         vscode.languages.registerCallHierarchyProvider(rubySelector, callHierarchyProvider)
     );
 
+    // Formatting provider (RuboCop)
+    const formattingProvider = new RubyFormattingProvider(outputChannel);
+    context.subscriptions.push(
+        vscode.languages.registerDocumentFormattingEditProvider(rubySelector, formattingProvider)
+    );
+    context.subscriptions.push(
+        vscode.languages.registerDocumentRangeFormattingEditProvider(rubySelector, formattingProvider)
+    );
+
+    // Auto-end completion provider
+    const autoEndProvider = new RubyAutoEndProvider();
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            rubySelector,
+            autoEndProvider,
+            '\n', ' ' // Trigger on newline and space
+        )
+    );
+
+    // Format on save (if enabled)
+    context.subscriptions.push(
+        vscode.workspace.onWillSaveTextDocument(async (event) => {
+            const config = vscode.workspace.getConfiguration('rubymate');
+            const formatOnSave = config.get<boolean>('formatOnSave', false);
+
+            if (formatOnSave && event.document.languageId === 'ruby') {
+                // FIX: Add error handling for format-on-save
+                try {
+                    const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>(
+                        'vscode.executeFormatDocumentProvider',
+                        event.document.uri
+                    );
+
+                    if (edits && edits.length > 0) {
+                        const workspaceEdit = new vscode.WorkspaceEdit();
+                        workspaceEdit.set(event.document.uri, edits);
+                        const applied = await vscode.workspace.applyEdit(workspaceEdit);
+
+                        // FIX: Log if edit application failed
+                        if (!applied) {
+                            outputChannel.appendLine(`Failed to apply formatting edits for ${event.document.fileName}`);
+                        }
+                    }
+                } catch (error) {
+                    // FIX: Catch and log errors without blocking save
+                    outputChannel.appendLine(`Format on save error: ${error}`);
+                    // Don't show error message to user - file save should continue
+                }
+            }
+        })
+    );
+
     outputChannel.appendLine('✓ Navigation providers registered');
     outputChannel.appendLine('  - Go to Definition (F12) - with multi-result popup');
     outputChannel.appendLine('  - Find All References (Shift+F12)');
     outputChannel.appendLine('  - Type Hierarchy (shows class inheritance)');
     outputChannel.appendLine('  - Call Hierarchy (shows method calls)');
     outputChannel.appendLine('  - Hover for Documentation');
+    outputChannel.appendLine('✓ Formatting provider registered (RuboCop)');
+    outputChannel.appendLine('✓ Auto-end completion provider registered');
 }
 
 function registerDebugProvidersLazy(context: vscode.ExtensionContext) {

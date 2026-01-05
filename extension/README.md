@@ -7,23 +7,27 @@
 
 > **A complete, self-contained Ruby and Rails development environment for Visual Studio Code.** Everything you need for professional Ruby development in a single extension - no complex setup, no external dependencies, just install and start coding.
 
+---
+
 ## Why RubyMate?
 
 **One Extension. Complete Solution.**
 
 Instead of installing and configuring multiple extensions, language servers, and dependencies, RubyMate provides a unified, professional development environment out of the box.
 
-- ✅ **Works Immediately** - No gems to install, no LSP servers to configure
-- ✅ **All-in-One** - Navigation, debugging, testing, linting, and Rails support in one package
-- ✅ **Zero Config** - Auto-detects Ruby version managers (rbenv, rvm, chruby, asdf)
-- ✅ **Rails Native** - Deep integration with Ruby on Rails projects
-- ✅ **Performance Focused** - Fast indexing and responsive navigation
+### Key Benefits
+
+- **Works Immediately** - No gems to install, no LSP servers to configure
+- **All-in-One** - Navigation, debugging, testing, linting, and Rails support in one package
+- **Zero Config** - Auto-detects Ruby version managers (rbenv, rvm, chruby, asdf)
+- **Rails Native** - Deep integration with Ruby on Rails projects
+- **Performance Focused** - Fast indexing and responsive navigation
 
 ---
 
 ## Core Features
 
-### 🧭 Intelligent Code Navigation
+### Intelligent Code Navigation
 
 Professional-grade code intelligence built directly into the extension:
 
@@ -40,7 +44,7 @@ Professional-grade code intelligence built directly into the extension:
 - Block parameters, instance variables, and class variables
 - ActiveRecord associations and Rails-specific patterns
 
-### 🚂 Deep Rails Integration
+### Deep Rails Integration
 
 Seamlessly navigate and work with Ruby on Rails projects:
 
@@ -51,7 +55,7 @@ Seamlessly navigate and work with Ruby on Rails projects:
 - **Generators** - Create models, controllers, migrations, and scaffolds from the command palette
 - **Database Tools** - Run migrations and rollbacks with one click
 
-### 🐛 Full Debugging Support
+### Full Debugging Support
 
 Integrated debugging powered by Ruby's official debug gem:
 
@@ -62,22 +66,24 @@ Integrated debugging powered by Ruby's official debug gem:
 - **Rails Debugging** - Debug Rails servers, console sessions, and Rake tasks
 - **Test Debugging** - Debug RSpec and Minitest tests with breakpoint support
 
-### 🧪 Integrated Test Explorer
+### Integrated Test Explorer
 
 Visual testing interface for RSpec and Minitest:
 
 - **Test Tree View** - Hierarchical display of all tests in your project
 - **Run & Debug** - Execute or debug individual tests, suites, or entire files
-- **Live Results** - See test results with ✅/❌ indicators and execution times
+- **Live Results** - See test results with pass/fail indicators and execution times
 - **Auto-Discovery** - Automatically detects and watches for test file changes
 - **Gutter Icons** - Run/debug tests directly from the editor
 
-### 📊 Code Quality & Analysis
+### Code Quality & Analysis
 
 Built-in tools to maintain code quality:
 
 - **RuboCop Integration** - Real-time linting with auto-fix capabilities
-- **Format on Save** - Automatically format Ruby files using RuboCop
+- **Auto-Formatting** - Format document or selection with RuboCop (Alt+Shift+F)
+- **Format on Save** - Automatically format Ruby files when saving (configurable)
+- **Auto-Insert End** - Automatically insert 'end' keyword for Ruby blocks (def, class, if, etc.)
 - **N+1 Query Detection** - Identify potential performance issues in ActiveRecord queries
 - **Dead Code Detection** - Find unused classes, methods, and constants
 - **Code Snippets** - 40+ Ruby and Rails snippets for faster coding
@@ -88,19 +94,20 @@ Built-in tools to maintain code quality:
 
 ### Installation
 
-1. **Install RubyMate** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
-2. **Open a Ruby or Rails project** in VS Code
-3. **Start coding** - RubyMate activates automatically
+1. Install RubyMate from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+2. Open a Ruby or Rails project in VS Code
+3. Start coding - RubyMate activates automatically
 
 That's it! No additional configuration needed.
 
 ### Requirements
 
-- **Ruby** 2.7+ (automatically detected via rbenv, rvm, chruby, or asdf)
+- **Ruby** 2.7 or higher (automatically detected via rbenv, rvm, chruby, or asdf)
 - **Bundler** (standard with Ruby installations)
-- **Rails** 6.0+ (optional, for Rails-specific features)
+- **Rails** 6.0 or higher (optional, for Rails-specific features)
 
 **Optional dependencies** for enhanced features:
+
 ```ruby
 # Gemfile
 group :development do
@@ -155,6 +162,9 @@ RubyMate works with sensible defaults. Customize via VS Code settings if needed:
   // Auto-format Ruby files on save
   "rubymate.formatOnSave": false,
 
+  // Auto-insert 'end' keyword for Ruby blocks
+  "rubymate.autoInsertEnd": true,
+
   // Ruby executable (auto-detected by default)
   "rubymate.rubyPath": "ruby",
 
@@ -201,13 +211,13 @@ For team consistency, add to `.vscode/settings.json` in your project:
 
 | Feature | RubyMate | LSP-Based Extensions |
 |---------|----------|----------------------|
-| **Installation** | ✅ Install and go | ⚠️ Install extension + gem |
-| **Dependencies** | ✅ Self-contained | ❌ Requires ruby-lsp gem in every project |
-| **Navigation** | ✅ IDE-quality features | ✅ Basic LSP features |
-| **Rails Support** | ✅ Built-in deep integration | ⚠️ Limited or via add-ons |
-| **Debugging** | ✅ Integrated | ⚠️ Separate extension needed |
-| **Testing** | ✅ Visual Test Explorer | ⚠️ Separate extension needed |
-| **Reliability** | ✅ Single codebase | ⚠️ Multiple components can break |
+| **Installation** | Install and go | Install extension + gem |
+| **Dependencies** | Self-contained | Requires ruby-lsp gem in every project |
+| **Navigation** | IDE-quality features | Basic LSP features |
+| **Rails Support** | Built-in deep integration | Limited or via add-ons |
+| **Debugging** | Integrated | Separate extension needed |
+| **Testing** | Visual Test Explorer | Separate extension needed |
+| **Reliability** | Single codebase | Multiple components can break |
 
 ---
 
@@ -317,11 +327,11 @@ Find unused code to keep your project clean:
 
 We're continuously improving RubyMate. Upcoming features:
 
-- 🔄 Enhanced refactoring tools
-- 📈 Code metrics and complexity analysis
-- 🔍 Advanced search and replace with Ruby patterns
-- 🎯 AI-powered code suggestions
-- 📦 Bundler integration and gem management
+- Enhanced refactoring tools
+- Code metrics and complexity analysis
+- Advanced search and replace with Ruby patterns
+- AI-powered code suggestions
+- Bundler integration and gem management
 
 **Have a feature request?** [Open an issue](https://github.com/Balaji2682/rubymate/issues) on GitHub.
 
@@ -331,11 +341,11 @@ We're continuously improving RubyMate. Upcoming features:
 
 Contributions are welcome! Here's how you can help:
 
-- 🐛 **Report bugs** - [Open an issue](https://github.com/Balaji2682/rubymate/issues)
-- 💡 **Suggest features** - [Start a discussion](https://github.com/Balaji2682/rubymate/discussions)
-- 🔧 **Submit pull requests** - See [CONTRIBUTING.md](https://github.com/Balaji2682/rubymate/blob/main/CONTRIBUTING.md)
-- ⭐ **Star the project** - Show your support on [GitHub](https://github.com/Balaji2682/rubymate)
-- 📢 **Spread the word** - Share with fellow Ruby developers
+- **Report bugs** - [Open an issue](https://github.com/Balaji2682/rubymate/issues)
+- **Suggest features** - [Start a discussion](https://github.com/Balaji2682/rubymate/discussions)
+- **Submit pull requests** - See [CONTRIBUTING.md](https://github.com/Balaji2682/rubymate/blob/main/CONTRIBUTING.md)
+- **Star the project** - Show your support on [GitHub](https://github.com/Balaji2682/rubymate)
+- **Spread the word** - Share with fellow Ruby developers
 
 ### Development Setup
 
@@ -364,11 +374,11 @@ See [CHANGELOG.md](https://github.com/Balaji2682/rubymate/blob/main/CHANGELOG.md
 
 ## Support & Resources
 
-- 📖 **Documentation** - [GitHub Wiki](https://github.com/Balaji2682/rubymate/wiki)
-- 💬 **Discussions** - [GitHub Discussions](https://github.com/Balaji2682/rubymate/discussions)
-- 🐛 **Bug Reports** - [GitHub Issues](https://github.com/Balaji2682/rubymate/issues)
-- 🔔 **Updates** - [Release Notes](https://github.com/Balaji2682/rubymate/releases)
-- ⭐ **Star on GitHub** - [github.com/Balaji2682/rubymate](https://github.com/Balaji2682/rubymate)
+- **Documentation** - [GitHub Wiki](https://github.com/Balaji2682/rubymate/wiki)
+- **Discussions** - [GitHub Discussions](https://github.com/Balaji2682/rubymate/discussions)
+- **Bug Reports** - [GitHub Issues](https://github.com/Balaji2682/rubymate/issues)
+- **Updates** - [Release Notes](https://github.com/Balaji2682/rubymate/releases)
+- **Star on GitHub** - [github.com/Balaji2682/rubymate](https://github.com/Balaji2682/rubymate)
 
 ---
 
@@ -380,11 +390,10 @@ MIT License - See [LICENSE](https://github.com/Balaji2682/rubymate/blob/main/LIC
 
 ## Acknowledgments
 
-RubyMate integrates with and is inspired by excellent Ruby tools:
+RubyMate integrates with excellent Ruby tools:
 
 - **[Ruby Debug](https://github.com/ruby/debug)** - Official Ruby debugger by the Ruby core team
 - **[RuboCop](https://github.com/rubocop/rubocop)** - Ruby static code analyzer and formatter
-- **[Ruby LSP](https://github.com/Shopify/ruby-lsp)** - Shopify's language server architecture inspiration
 
 Built with ❤️ for the Ruby community.
 
@@ -394,9 +403,9 @@ Built with ❤️ for the Ruby community.
 
 ### Ready to enhance your Ruby development?
 
-[![Install Now](https://img.shields.io/badge/Install-VS%20Code%20Marketplace-blue?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
-[![View on GitHub](https://img.shields.io/badge/View-GitHub-black?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate)
-[![Report Issue](https://img.shields.io/badge/Report-Issue-red?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate/issues)
+[![Install Now](https://img.shields.io/badge/Install-VS%20Code%20Marketplace-007ACC?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![View on GitHub](https://img.shields.io/badge/View-GitHub-181717?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate)
+[![Report Issue](https://img.shields.io/badge/Report-Issue-E74C3C?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate/issues)
 
 **One extension. Complete solution. Start building better Ruby applications today.**
 

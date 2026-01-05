@@ -65,32 +65,95 @@ export class DatabaseCommands {
      * Show database schema visualization
      */
     private async showSchemaVisualization(): Promise<void> {
-        const schema = this.schemaParser.getSchema();
+        try {
+            const schema = this.schemaParser.getSchema();
 
-        if (!schema) {
-            vscode.window.showWarningMessage('No schema.rb found. Run migrations first.');
-            return;
+            if (!schema) {
+                vscode.window.showWarningMessage('No schema.rb found. Run migrations first.');
+                return;
+            }
+
+            // Create webview panel with Content Security Policy
+            const panel = vscode.window.createWebviewPanel(
+                'databaseSchema',
+                'Database Schema',
+                vscode.ViewColumn.One,
+                {
+                    enableScripts: false,  // FIX: Disable scripts for security
+                    localResourceRoots: []  // FIX: No local resources needed
+                }
+            );
+
+            // FIX: Wrap HTML generation in try-catch
+            try {
+                panel.webview.html = this.getSchemaHTML(schema);
+            } catch (error) {
+                panel.webview.html = this.getErrorHTML(`Failed to generate schema: ${error}`);
+                this.outputChannel.appendLine(`Schema HTML generation error: ${error}`);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to show schema: ${error}`);
+            this.outputChannel.appendLine(`Schema visualization error: ${error}`);
         }
+    }
 
-        // Create webview panel
-        const panel = vscode.window.createWebviewPanel(
-            'databaseSchema',
-            'Database Schema',
-            vscode.ViewColumn.One,
-            { enableScripts: true }
-        );
+    /**
+     * FIX: Generate error HTML with proper escaping
+     */
+    private getErrorHTML(message: string): string {
+        const escapedMessage = this.escapeHtml(message);
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+                <style>
+                    body {
+                        font-family: var(--vscode-font-family);
+                        color: var(--vscode-errorForeground);
+                        padding: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Error</h2>
+                <p>${escapedMessage}</p>
+            </body>
+            </html>
+        `;
+    }
 
-        panel.webview.html = this.getSchemaHTML(schema);
+    /**
+     * FIX: HTML escape function to prevent XSS
+     */
+    private escapeHtml(unsafe: string): string {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     /**
      * Generate HTML for schema visualization
      */
     private getSchemaHTML(schema: any): string {
+        // FIX: Validate schema exists
+        if (!schema || !schema.tables) {
+            return this.getErrorHTML('Invalid schema data');
+        }
+
         const tables = Array.from(schema.tables.values());
 
         let tablesHTML = '';
         for (const table of tables) {
+            // FIX: Validate table object
+            if (!table || !(table as Table).columns) {
+                continue;
+            }
+
             const columnsHTML = (table as Table).columns
                 .map(col => {
                     const badges = [];
@@ -98,12 +161,17 @@ export class DatabaseCommands {
                     if (col.foreignKey) badges.push('<span class="badge fk">FK</span>');
                     if (!col.nullable) badges.push('<span class="badge nn">NOT NULL</span>');
 
+                    // FIX: Escape all user data to prevent HTML injection
+                    const colName = this.escapeHtml(col.name || 'unknown');
+                    const colType = this.escapeHtml(col.type || 'unknown');
+                    const fkTable = col.foreignKey ? this.escapeHtml(col.foreignKey.table) : '';
+
                     return `
                         <tr>
-                            <td>${col.name}</td>
-                            <td>${col.type}</td>
+                            <td>${colName}</td>
+                            <td>${colType}</td>
                             <td>${badges.join(' ')}</td>
-                            <td>${col.foreignKey ? `→ ${col.foreignKey.table}` : ''}</td>
+                            <td>${fkTable ? `→ ${fkTable}` : ''}</td>
                         </tr>
                     `;
                 })
@@ -114,15 +182,18 @@ export class DatabaseCommands {
                     <h4>Indexes</h4>
                     <ul>
                         ${(table as Table).indexes.map(idx =>
-                    `<li>${idx.columns.join(', ')} ${idx.unique ? '(UNIQUE)' : ''}</li>`
+                    `<li>${this.escapeHtml(idx.columns.join(', '))} ${idx.unique ? '(UNIQUE)' : ''}</li>`
                 ).join('')}
                     </ul>
                 `
                 : '';
 
+            // FIX: Escape table name and validate it exists
+            const tableName = (table as any).name ? this.escapeHtml((table as any).name) : 'Unknown';
+
             tablesHTML += `
                 <div class="table-card">
-                    <h3>${table.name}</h3>
+                    <h3>${tableName}</h3>
                     <table>
                         <thead>
                             <tr>

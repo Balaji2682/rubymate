@@ -247,7 +247,9 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
         }
 
         // Add the program to debug
-        args.push('--', config.program);
+        if (config.program) {
+            args.push('--', config.program);
+        }
 
         // Add program arguments
         if (config.args && config.args.length > 0) {
@@ -261,7 +263,7 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
             args,
             {
                 cwd: config.cwd,
-                env: { ...process.env, ...config.env }
+                env: { ...process.env, ...(config.env || {}) } as { [key: string]: string }
             }
         );
 
