@@ -22,4 +22,3 @@ Gemfile.lock
 # OS
 .DS_Store
 Thumbs.db
-mcp-server

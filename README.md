@@ -7,18 +7,6 @@
 
 **The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings Advanced/Professional IDE-style productivity to VS Code.
 
-## NEW: MCP Server for Claude AI
-
-RubyMate now includes a **Model Context Protocol (MCP) server** that allows Claude AI to work efficiently with your Ruby/Rails projects with **80-95% token savings**!
-
-- 18 specialized tools for Ruby/Rails development
-- Instant symbol search and code navigation
-- Rails-aware component mapping
-- N+1 detection and security scanning
-- Zero configuration needed
-
-[Quick Start Guide](QUICKSTART_MCP.md) | [Full MCP Documentation](mcp-server/README.md) | [Setup Instructions](CLAUDE_DESKTOP_SETUP.md)
-
 ## ✨ Features
 
 ### 🔍 Intelligent Code Completion
