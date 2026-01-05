@@ -47,3 +47,6 @@ Thumbs.db
 # Misc
 *.vsix
 .github/**
+
+# Exclude backup/original files
+images/icon-original.png
