@@ -184,9 +184,13 @@ export class IntelligentIndexer {
         const duration = Date.now() - startTime;
         this.outputChannel.appendLine(`Indexed workspace in ${duration}ms`);
 
-        // Print statistics
+        // Print statistics only if there's meaningful data
         const stats = this.getStats();
-        this.outputChannel.appendLine(`Statistics: ${JSON.stringify(stats, null, 2)}`);
+        if (stats.graph.classes > 0 || stats.graph.modules > 0 || stats.search.totalSymbols > 0) {
+            this.outputChannel.appendLine(`Statistics: ${JSON.stringify(stats, null, 2)}`);
+        } else {
+            this.outputChannel.appendLine(`[INFO] Semantic graph indexing skipped (using fast symbol indexing instead)`);
+        }
     }
 
     /**
