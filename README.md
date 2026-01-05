@@ -7,16 +7,16 @@
 
 **The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings Advanced/Professional IDE-style productivity to VS Code.
 
-## ✨ Features
+## Features
 
-### 🔍 Intelligent Code Completion
+### Intelligent Code Completion
 - **Dual Language Server**: Combines Ruby LSP and Solargraph for superior autocomplete
 - **YARD Documentation**: Rich documentation on hover from Solargraph
 - **RBS Type Support**: Modern type checking via Ruby LSP
 - **Rails-Aware**: ActiveRecord models, associations, route helpers, and more
 - **Smart Merging**: Best suggestions from both language servers
 
-### 🧭 Advanced-Style Navigation
+### Advanced-Style Navigation
 - **Go to Definition** (`Ctrl+B` / `Ctrl+Click`): Jump to method/class definitions
 - **Go to Class** (`Ctrl+N`): Fuzzy search for any class or module
 - **File Structure** (`Ctrl+F12`): Quick outline view with fuzzy search
@@ -24,7 +24,7 @@
 - **Find Usages** (`Alt+F7`): Find all references to a symbol
 - **Navigate Related**: Jump between models, controllers, views, and specs
 
-### 🚂 Deep Rails Integration
+### Deep Rails Integration
 - **Smart Navigation**: Model ↔ Controller ↔ View ↔ Migration ↔ Spec
 - **Route Explorer**: Browse and jump to routes from `routes.rb`
 - **Schema Awareness**: Jump to table definitions in `schema.rb`
@@ -33,7 +33,7 @@
 - **Rails Console**: Integrated terminal with `rails console`
 - **Concerns Navigator**: Quick access to model/controller concerns
 
-### 🐛 Powerful Debugging
+### Powerful Debugging
 - **Ruby Debug (rdbg)**: Official debugger with full DAP support
 - **One-Click Debug**: Press `F5` to debug current file
 - **Rails Debugging**: Debug Rails server, console, and Rake tasks
@@ -42,7 +42,7 @@
 - **Interactive Console**: Evaluate expressions during debugging
 - **Remote Debugging**: Attach to running processes and containers
 
-### 🧪 Native Test Explorer
+### Native Test Explorer
 - **Visual Test Tree**: Hierarchical view of all tests
 - **RSpec Support**: Full `describe`/`context`/`it` parsing
 - **Minitest Support**: Class and method detection
@@ -51,7 +51,7 @@
 - **Live Results**: ✅/❌ decorations with execution times
 - **Auto-Discovery**: Watches for test file changes
 
-### 🎨 Code Quality
+### Code Quality
 - **Auto-Format** (`Ctrl+Shift+L`): Format with RuboCop
 - **Linting**: Real-time RuboCop suggestions
 - **Code Actions**: Quick fixes and refactorings
@@ -59,7 +59,7 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 1. **Ruby** (2.7+)
@@ -70,7 +70,7 @@
    ```
 
 ### Installation
-1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate)
+1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 2. Open a Ruby or Rails project
 3. RubyMate activates automatically
 4. Language server starts and indexes your workspace
@@ -84,7 +84,7 @@
 
 ---
 
-## 📖 Usage Guide
+## Usage Guide
 
 ### Navigation Shortcuts
 
@@ -160,7 +160,7 @@
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Basic Settings
 
@@ -212,7 +212,7 @@ Add to `keybindings.json`:
 
 ---
 
-## 🆚 Comparison
+## Comparison
 
 ### vs. Individual Extensions
 
@@ -240,7 +240,7 @@ Add to `keybindings.json`:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -248,7 +248,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 ```bash
 # Clone repository
-git clone https://github.com/your-username/rubymate.git
+git clone https://github.com/Balaji2682/rubymate.git
 cd rubymate
 
 # Install dependencies
@@ -268,36 +268,36 @@ code .
 
 ---
 
-## 📝 Changelog
+## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ---
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-Built on top of:
-- [ruby-lsp](https://github.com/Shopify/ruby-lsp) by Shopify
+Integrates with:
 - [solargraph](https://github.com/castwide/solargraph) by Fred Snyder
+- [sorbet](https://github.com/sorbet/sorbet) by Stripe
 - [debug](https://github.com/ruby/debug) by Ruby core team
 - [rubocop](https://github.com/rubocop/rubocop) by RuboCop team
 
-Inspired by Advanced IDEA and Professional IDE.
+Inspired by Professional IDEs for providing advanced Ruby development workflows.
 
 ---
 
-## 📞 Support
+## Support
 
-- 🐛 [Report Issues](https://github.com/your-username/rubymate/issues)
-- 💬 [Discussions](https://github.com/your-username/rubymate/discussions)
-- 📚 [Documentation](https://github.com/your-username/rubymate/wiki)
-- ⭐ [Star on GitHub](https://github.com/your-username/rubymate)
+- [Report Issues](https://github.com/Balaji2682/rubymate/issues)
+- [Discussions](https://github.com/Balaji2682/rubymate/discussions)
+- [Documentation](https://github.com/Balaji2682/rubymate/wiki)
+- [Star on GitHub](https://github.com/Balaji2682/rubymate)
 
 ---
 
@@ -305,6 +305,6 @@ Inspired by Advanced IDEA and Professional IDE.
 
 **Made with ❤️ for the Ruby community**
 
-[Install Now](https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate) | [GitHub](https://github.com/your-username/rubymate) | [Report Issue](https://github.com/your-username/rubymate/issues)
+[Install Now](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate) | [GitHub](https://github.com/Balaji2682/rubymate) | [Report Issue](https://github.com/Balaji2682/rubymate/issues)
 
 </div>

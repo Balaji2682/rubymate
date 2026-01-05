@@ -74,13 +74,13 @@
   "qna": "marketplace",
   "badges": [
     {
-      "url": "https://img.shields.io/visual-studio-marketplace/v/your-publisher.rubymate",
-      "href": "https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate",
+      "url": "https://img.shields.io/visual-studio-marketplace/v/BalajiR.rubymate",
+      "href": "https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate",
       "description": "Version"
     },
     {
-      "url": "https://img.shields.io/visual-studio-marketplace/i/your-publisher.rubymate",
-      "href": "https://marketplace.visualstudio.com/items?itemName=your-publisher.rubymate",
+      "url": "https://img.shields.io/visual-studio-marketplace/i/BalajiR.rubymate",
+      "href": "https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate",
       "description": "Installs"
     }
   ],
