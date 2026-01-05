@@ -1,0 +1,47 @@
+name: Publish Extension
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers on version tags like v0.2.1, v1.0.0, etc.
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install extension dependencies
+        working-directory: ./extension
+        run: npm ci
+
+      - name: Build extension
+        working-directory: ./extension
+        run: npm run compile:prod
+
+      - name: Package extension
+        working-directory: ./extension
+        run: npx vsce package
+
+      - name: Publish to VS Code Marketplace
+        working-directory: ./extension
+        run: npx vsce publish -p ${{ secrets.VSCE_TOKEN }}
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+
+      - name: Upload VSIX as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubymate-${{ github.ref_name }}.vsix
+          path: extension/*.vsix
