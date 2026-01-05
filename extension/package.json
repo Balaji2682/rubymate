@@ -2,7 +2,7 @@
   "name": "rubymate",
   "displayName": "Ruby & Rails - Complete IDE: LSP, Debugger, Test Explorer, Intellisense",
   "description": "Complete Ruby on Rails development: Language Server (LSP), Solargraph, Debugger, Test Explorer, RSpec, Minitest, RuboCop, ActiveRecord intelligence, Code Navigation, Auto-complete",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "BalajiR",
   "icon": "images/icon.png",
   "galleryBanner": {
