@@ -1,365 +1,341 @@
-# Ruby & Rails - Complete IDE for VS Code
+# RubyMate - All-in-One Ruby & Rails IDE for VS Code
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![Version](https://img.shields.io/visual-studio-marketplace/v/BalajiR.rubymate?style=flat-square&label=version)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
-[![License](https://img.shields.io/github/license/Balaji2682/rubymate?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/Balaji2682/rubymate?style=flat-square)](https://github.com/Balaji2682/rubymate/blob/main/LICENSE)
 
-**The complete Ruby and Ruby on Rails IDE extension for VS Code.** Self-contained, all-in-one solution for Ruby development featuring: **IDE-like navigation**, **intelligent code indexing**, **Ruby debugger**, **RSpec & Minitest test explorer**, **RuboCop linter**, **Rails support** with ActiveRecord intelligence, **code navigation**, **auto-complete**, **syntax highlighting**, **ERB/HAML support**, and **N+1 query detection**.
+> **A complete, self-contained Ruby and Rails development environment for Visual Studio Code.** Everything you need for professional Ruby development in a single extension - no complex setup, no external dependencies, just install and start coding.
 
-Perfect for Ruby on Rails developers who need professional-grade tools for debugging, testing, formatting, and navigating Ruby code. **No external dependencies required** - works out of the box! Supports all Ruby versions (2.7+) and Rails (6.0+) with rbenv, rvm, chruby, and asdf compatibility.
+## Why RubyMate?
 
-## 🚀 Quick Feature Overview
+**One Extension. Complete Solution.**
 
-- ✅ **IDE-like Navigation** - Go to definition, find all references, type hierarchy, call hierarchy
-- ✅ **Self-Contained Indexing** - No external LSP needed, fast and reliable
-- ✅ **Full Debugger** - Breakpoints, step debugging, variable inspection
-- ✅ **Test Explorer** - RSpec & Minitest with UI, run/debug individual tests
-- ✅ **RuboCop Integration** - Linting, formatting, auto-fix
-- ✅ **Rails Support** - ActiveRecord, routes, ERB, migrations, models
-- ✅ **Smart Search** - Context-aware symbol search with ranking
-- ✅ **N+1 Query Detection** - Automatic detection with gem exclusion
-- ✅ **Dead Code Detection** - Find unused classes and methods
-- ✅ **40+ Snippets** - Ruby and Rails code snippets
+Instead of installing and configuring multiple extensions, language servers, and dependencies, RubyMate provides a unified, professional development environment out of the box.
+
+- ✅ **Works Immediately** - No gems to install, no LSP servers to configure
+- ✅ **All-in-One** - Navigation, debugging, testing, linting, and Rails support in one package
+- ✅ **Zero Config** - Auto-detects Ruby version managers (rbenv, rvm, chruby, asdf)
+- ✅ **Rails Native** - Deep integration with Ruby on Rails projects
+- ✅ **Performance Focused** - Fast indexing and responsive navigation
 
 ---
 
-## 🎯 IDE-like Navigation (NEW!)
+## Core Features
 
-**Professional code navigation without external dependencies!**
+### 🧭 Intelligent Code Navigation
 
-### Find Where Methods Are Used
-```ruby
-class User
-  def full_name  # Click here, press Shift+F12
-    "#{first_name} #{last_name}"
-  end
-end
-# See all 15 places where full_name is called!
-```
+Professional-grade code intelligence built directly into the extension:
 
-### What You Get
-- **Go to Definition** (F12): Click any method/class → jump to definition (popup if multiple)
-- **Find All References** (Shift+F12): See everywhere a symbol is used
-- **Type Hierarchy**: View class inheritance trees and mixins
-- **Call Hierarchy**: See what calls a method and what it calls
-- **Hover Documentation**: Mouse over → see method signature and docs
-- **Smart Symbol Search** (Ctrl+T): Find any class/method in workspace
+- **Go to Definition** (F12) - Jump to any class, method, module, or constant
+- **Find All References** (Shift+F12) - See everywhere a symbol is used across your project
+- **Symbol Search** (Ctrl+T) - Quickly find and navigate to any symbol in your workspace
+- **Hover Documentation** - View method signatures and documentation on mouse hover
+- **Type Hierarchy** - Visualize class inheritance trees and module inclusions
+- **Call Hierarchy** - Understand method call relationships throughout your codebase
 
-### It Just Works™
-- ✅ No gems to install
-- ✅ No external LSP needed
-- ✅ Works immediately after installation
-- ✅ Detects 12+ Ruby patterns (sends, delegates, symbols, etc.)
-- ✅ Progress indicators for large searches
-- ✅ ~5-15 second initial indexing, then instant
-
----
-
-## ✨ Detailed Features
-
-### 🔍 Intelligent Code Navigation
-- **Go to Definition** (F12): Jump to classes, methods, modules, constants - with multi-result popup
-- **Find All References** (Shift+F12): See everywhere a symbol is used across your codebase
-- **Type Hierarchy**: View class inheritance trees, included/extended modules
-- **Call Hierarchy**: See incoming calls (who calls this) and outgoing calls (what it calls)
-- **Hover Documentation**: See method signatures, parameters, and file locations
-- **Symbol Search** (Ctrl+T): Quickly find any class, method, or module in workspace
-- **Self-Contained**: No external dependencies, uses our own fast indexer
-
-### 🔎 Advanced Reference Detection
-Finds references in all these Ruby patterns:
-- ✅ Direct calls: `user.full_name`
-- ✅ Method chains: `current_user.full_name.upcase`
-- ✅ Dynamic sends: `send(:full_name)`, `public_send(:full_name)`
-- ✅ Symbols: `:full_name`
-- ✅ Hash keys: `{ full_name: "..." }`
-- ✅ Delegates: `delegate :full_name, to: :user`
-- ✅ Aliases: `alias :name :full_name`
-- ✅ respond_to?: `respond_to?(:full_name)`
-- ✅ Block parameters: `map(&:full_name)`
-- ✅ Instance/class variables: `@name`, `@@count`
+**Smart Detection** - Recognizes Ruby patterns including:
+- Direct method calls, method chains, and dynamic sends
+- Symbols, hash keys, delegates, and aliases
+- Block parameters, instance variables, and class variables
+- ActiveRecord associations and Rails-specific patterns
 
 ### 🚂 Deep Rails Integration
-- **Smart Navigation**: Model ↔ Controller ↔ View ↔ Migration ↔ Spec
-- **Route Explorer**: Browse and jump to routes from `routes.rb`
-- **Schema Awareness**: Jump to table definitions in `schema.rb`
-- **Rails Generators**: Create models, controllers, migrations, scaffolds
-- **Database Operations**: Run migrations, rollback with one click
-- **Rails Console**: Integrated terminal with `rails console`
-- **Concerns Navigator**: Quick access to model/controller concerns
 
-### 🐛 Powerful Debugging
-- **Ruby Debug (rdbg)**: Official debugger with full DAP support
-- **One-Click Debug**: Press `F5` to debug current file
-- **Rails Debugging**: Debug Rails server, console, and Rake tasks
-- **Test Debugging**: Debug individual RSpec/Minitest tests
-- **Breakpoints**: Line, conditional, and exception breakpoints
-- **Interactive Console**: Evaluate expressions during debugging
-- **Remote Debugging**: Attach to running processes and containers
+Seamlessly navigate and work with Ruby on Rails projects:
 
-### 🧪 Native Test Explorer
-- **Visual Test Tree**: Hierarchical view of all tests
-- **RSpec Support**: Full `describe`/`context`/`it` parsing
-- **Minitest Support**: Class and method detection
-- **Run Individual Tests**: Click to run any test, suite, or file
-- **Debug Tests**: One-click debugging with breakpoints
-- **Live Results**: ✅/❌ decorations with execution times
-- **Auto-Discovery**: Watches for test file changes
+- **Smart Navigation** - Quick jump between Models ↔ Controllers ↔ Views ↔ Specs ↔ Migrations
+- **Route Explorer** - Browse and search Rails routes with instant navigation
+- **Schema Intelligence** - Jump to table definitions and view database schema
+- **Rails Console** - Integrated terminal access to `rails console`
+- **Generators** - Create models, controllers, migrations, and scaffolds from the command palette
+- **Database Tools** - Run migrations and rollbacks with one click
 
-### 🎨 Code Quality
-- **Auto-Format** (`Ctrl+Shift+L`): Format with RuboCop
-- **Linting**: Real-time RuboCop suggestions
-- **Code Actions**: Quick fixes and refactorings
-- **Snippets**: 40+ Ruby and Rails code snippets
+### 🐛 Full Debugging Support
 
-### 🧠 Intelligent Indexing (NEW!)
-**Professional-grade semantic code intelligence**
+Integrated debugging powered by Ruby's official debug gem:
 
-- **Semantic Graph**: Understands code relationships, inheritance, method calls
-- **Type Inference**: Infers types from schema, associations, and code flow
-- **Call Hierarchy** (`Ctrl+H`): See who calls a method and who calls them
-- **Type Hierarchy** (`Ctrl+Shift+H`): View inheritance chains
-- **Smart Search** (`Cmd+Shift+F`): Context-aware ranked search (by usage, recency, relevance)
-- **Rails Navigation** (`Cmd+Shift+T`): Jump between Model ↔ Controller ↔ View ↔ Spec
-- **Find All References** (`Alt+F7`): Categorized by reads, writes, calls
-- **Dead Code Detection**: Automatically find unused classes, methods, constants
-- **Find Subclasses** (`Ctrl+Alt+B`): See all classes that inherit from current class
+- **One-Click Debugging** - Press F5 to debug current file instantly
+- **Breakpoints** - Line breakpoints, conditional breakpoints, and exception breakpoints
+- **Variable Inspection** - Examine local variables, instance variables, and expressions
+- **Step Debugging** - Step through code line by line with full call stack visibility
+- **Rails Debugging** - Debug Rails servers, console sessions, and Rake tasks
+- **Test Debugging** - Debug RSpec and Minitest tests with breakpoint support
 
-**Features:**
-- 95% confidence type inference from `schema.rb`
-- 90% confidence from ActiveRecord associations
-- Tracks method calls across entire codebase
-- Usage frequency and recency scoring
-- Project code ranked higher than gems
-- ~40KB bundle size for complete intelligence
+### 🧪 Integrated Test Explorer
+
+Visual testing interface for RSpec and Minitest:
+
+- **Test Tree View** - Hierarchical display of all tests in your project
+- **Run & Debug** - Execute or debug individual tests, suites, or entire files
+- **Live Results** - See test results with ✅/❌ indicators and execution times
+- **Auto-Discovery** - Automatically detects and watches for test file changes
+- **Gutter Icons** - Run/debug tests directly from the editor
+
+### 📊 Code Quality & Analysis
+
+Built-in tools to maintain code quality:
+
+- **RuboCop Integration** - Real-time linting with auto-fix capabilities
+- **Format on Save** - Automatically format Ruby files using RuboCop
+- **N+1 Query Detection** - Identify potential performance issues in ActiveRecord queries
+- **Dead Code Detection** - Find unused classes, methods, and constants
+- **Code Snippets** - 40+ Ruby and Rails snippets for faster coding
 
 ---
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-**RubyMate works out of the box - no gems required!** ✅
-
-1. **Ruby**: 2.7, 3.0, 3.1, 3.2, 3.3+ (any version)
-2. **Rails**: 6.0, 6.1, 7.0, 7.1, 7.2+ (optional)
-3. **Bundler**: Any version
-
-**Optional gems for enhanced features** (add to your `Gemfile`):
-   ```ruby
-   group :development do
-     gem 'rubocop'      # For linting and formatting
-     gem 'debug'        # For debugging (or 'byebug' for Ruby 2.7)
-   end
-   ```
-
-**Version managers**: Works with rbenv, rvm, chruby, asdf - automatically detects your Ruby version!
-
-**No external dependencies needed** - Navigation, indexing, and all core features work immediately after installation!
+## Quick Start
 
 ### Installation
-1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
-2. Open a Ruby or Rails project
-3. RubyMate activates automatically and indexes your workspace (takes ~5-15 seconds)
-4. **That's it!** All features work immediately - no gems or external LSP needed
+
+1. **Install RubyMate** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+2. **Open a Ruby or Rails project** in VS Code
+3. **Start coding** - RubyMate activates automatically
+
+That's it! No additional configuration needed.
+
+### Requirements
+
+- **Ruby** 2.7+ (automatically detected via rbenv, rvm, chruby, or asdf)
+- **Bundler** (standard with Ruby installations)
+- **Rails** 6.0+ (optional, for Rails-specific features)
+
+**Optional dependencies** for enhanced features:
+```ruby
+# Gemfile
+group :development do
+  gem 'debug'        # For debugging (Ruby 3.0+)
+  gem 'rubocop'      # For linting and formatting
+  gem 'rspec'        # For RSpec test support
+end
+```
 
 ### First Steps
-1. **Open a Ruby file** - Navigation works immediately
-2. **Press `F12`** - Try "Go to Definition" on any class or method
-3. **Press `Shift+F12`** - See all places where a method is used
-4. **Right-click** - Try "Show Type Hierarchy" or "Show Call Hierarchy"
-5. **Hover over code** - See method signatures and documentation
-6. **Rails projects** - Click "$(ruby) Rails" in status bar for Rails commands
+
+1. **Try Navigation** - Open a Ruby file, place cursor on a method name, press `F12` to jump to definition
+2. **Explore References** - Select a method, press `Shift+F12` to see all usages
+3. **Rails Projects** - Click the Ruby icon in the status bar for Rails commands
+4. **Run Tests** - Open the Testing sidebar to see and run your test suite
+5. **Debug Code** - Set a breakpoint, press `F5` to start debugging
 
 ---
 
-## 📖 Usage Guide
+## Essential Shortcuts
 
-### Navigation Shortcuts
+| Shortcut | Command | Description |
+|----------|---------|-------------|
+| `F12` | Go to Definition | Jump to where a symbol is defined |
+| `Shift+F12` | Find All References | Show all usages of a symbol |
+| `Ctrl+T` | Go to Symbol | Search for any class, method, or module |
+| `F5` | Start Debugging | Debug the current file or test |
+| `Ctrl+Shift+O` | File Symbols | View outline of current file |
+| `Alt+Shift+F` | Format Document | Format with RuboCop |
 
-| Shortcut | Action | Description |
-|----------|--------|-------------|
-| `F12` or `Ctrl+Click` | Go to Definition | Jump to class/method definition (shows popup if multiple) |
-| `Shift+F12` | Find All References | Show everywhere a symbol is used |
-| `Ctrl+T` | Go to Symbol | Search any class/method/module in workspace |
-| `Ctrl+Shift+O` | File Outline | Show symbols in current file |
-| `Alt+Left` | Go Back | Navigate backwards |
-| `Alt+Right` | Go Forward | Navigate forwards |
-| Right-click menu | Type Hierarchy | Show class inheritance tree |
-| Right-click menu | Call Hierarchy | Show method call relationships |
-| Hover mouse | Quick Documentation | See method signature and info |
+### Rails Navigation (Command Palette)
 
-### Rails Commands
+Access via `Ctrl+Shift+P` or status bar Ruby icon:
 
-**Access via**: Status bar "$(ruby) Rails" button or Command Palette
-
-| Command | Description |
-|---------|-------------|
-| Navigate to Model | Jump to related model |
-| Navigate to Controller | Jump to related controller |
-| Navigate to View | Jump to view template |
-| Navigate to Migration | Browse and open migrations |
-| Navigate to Spec | Toggle between code and spec |
-| Show Routes | Browse all Rails routes |
-| Go to Route | Search for specific route |
-| Generate Model | Create new model with attributes |
-| Generate Controller | Create new controller |
-| Generate Migration | Create new migration |
-| Run Migrations | Execute `rails db:migrate` |
-| Open Rails Console | Launch interactive console |
-| Show Schema | View `db/schema.rb` |
-| Go to Table Definition | Jump to table in schema |
-
-### Debugging
-
-#### Quick Debug Current File
-1. Open Ruby file
-2. Press `F5`
-3. Debugger starts automatically
-
-#### Debug RSpec Test
-1. Open spec file
-2. Open Test Explorer (beaker icon)
-3. Click debug icon next to test
-4. Or use Command Palette: `Test: Debug Test at Cursor`
-
-#### Debug Rails Server
-1. Press `F5`
-2. Select "Debug Rails Server"
-3. Set breakpoints in controllers/models
-4. Visit route in browser
-5. Debugger pauses at breakpoints
-
-### Testing
-
-#### Run Tests from Explorer
-1. Open Test Explorer (Testing sidebar)
-2. Click play icon on test/suite/file
-3. Results appear with ✅/❌ indicators
-
-#### Run Test at Cursor
-1. Place cursor in test
-2. Command Palette: `Test: Run Test at Cursor`
-3. Or click gutter icon
-
-#### Debug Failing Test
-1. Test fails in explorer (❌)
-2. Click debug icon
-3. Debugger launches with breakpoints
-4. Inspect variables and fix issue
+- **RubyMate: Navigate to Model** - Jump to related model
+- **RubyMate: Navigate to Controller** - Jump to related controller
+- **RubyMate: Navigate to View** - Jump to view template
+- **RubyMate: Toggle Between Code and Spec** - Switch between implementation and tests
+- **RubyMate: Show Rails Routes** - Browse all application routes
+- **RubyMate: Rails Console** - Open interactive Rails console
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-### Basic Settings
+RubyMate works with sensible defaults. Customize via VS Code settings if needed:
+
+### Common Settings
 
 ```json
 {
-  // Auto-format on save
+  // Auto-format Ruby files on save
   "rubymate.formatOnSave": false,
 
-  // Ruby executable path (auto-detects from rbenv/rvm/chruby/asdf)
+  // Ruby executable (auto-detected by default)
   "rubymate.rubyPath": "ruby",
 
-  // Test framework (auto-detects from project)
-  "rubymate.testFramework": "auto", // "rspec" | "minitest" | "auto"
+  // Test framework (auto-detected)
+  "rubymate.testFramework": "auto",  // "rspec" | "minitest" | "auto"
 
-  // Enable Rails features (auto-detects Rails projects)
+  // Enable Rails features (auto-detected)
   "rubymate.enableRailsSupport": true,
 
-  // Enable N+1 query detection
+  // N+1 query detection
   "rubymate.enableN1Detection": true,
-
-  // Paths to exclude from N+1 detection
-  "rubymate.n1DetectionExcludePaths": []
+  "rubymate.n1DetectionExcludePaths": ["**/lib/**"]
 }
 ```
 
-### Custom Keybindings
+### Workspace Settings
 
-Add to `keybindings.json`:
+For team consistency, add to `.vscode/settings.json` in your project:
 
 ```json
-[
-  // Rails Navigation
-  {
-    "key": "cmd+shift+m",
-    "command": "rubymate.rails.navigateToModel",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "cmd+shift+c",
-    "command": "rubymate.rails.navigateToController",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "cmd+shift+v",
-    "command": "rubymate.rails.navigateToView",
-    "when": "editorLangId == ruby"
-  },
-
-  // Intelligent Navigation
-  {
-    "key": "ctrl+h",
-    "command": "rubymate.showCallHierarchy",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "ctrl+shift+h",
-    "command": "rubymate.showTypeHierarchy",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "ctrl+alt+b",
-    "command": "rubymate.findAllSubclasses",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "alt+f7",
-    "command": "rubymate.findAllReferences",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "cmd+shift+t",
-    "command": "rubymate.goToRelatedFiles",
-    "when": "editorLangId == ruby"
-  },
-  {
-    "key": "cmd+shift+f",
-    "command": "rubymate.smartSearch",
-    "when": "editorLangId == ruby"
-  }
-]
+{
+  "rubymate.formatOnSave": true,
+  "rubymate.testFramework": "rspec"
+}
 ```
 
 ---
 
-## 🆚 Comparison
+## Comparison with Other Solutions
 
-### vs. Individual Extensions
+### RubyMate vs. Multiple Extensions
 
-| Feature | RubyMate | Ruby LSP + Shopify.ruby-lsp |
-|---------|----------|------------------------------|
-| **Setup** | Install one extension | Install extension + gem |
-| **Dependencies** | ✅ None (self-contained) | ❌ Requires ruby-lsp gem |
-| **Navigation** | ✅ IDE-like (6+ features) | ✅ Basic LSP |
-| **Find References** | ✅ 12 Ruby patterns | ❌ Basic search |
-| **Type Hierarchy** | ✅ Full inheritance tree | ❌ Not available |
-| **Call Hierarchy** | ✅ Incoming + outgoing | ❌ Not available |
-| **Require Navigation** | ✅ Built-in | ❌ Not available |
-| **N+1 Detection** | ✅ Built-in | ❌ Not available |
-| **Rails Support** | ✅ Deep integration | ⚠️ Via add-on |
-| **Test Explorer** | ✅ Native UI | ✅ Via extension |
-| **Speed** | ⚡ Fast (in-process) | 🐢 Slower (separate process) |
-| **Reliability** | ✅ Self-contained | ⚠️ External gem dependency |
+| Aspect | RubyMate | Typical Multi-Extension Setup |
+|--------|----------|-------------------------------|
+| **Installation** | One extension | 3-5+ extensions |
+| **Setup Time** | < 1 minute | 15-30 minutes |
+| **External Dependencies** | None required | Gems + LSP servers |
+| **Maintenance** | Single update | Multiple extension updates |
+| **Compatibility** | Guaranteed integration | Potential conflicts |
+| **Performance** | Optimized single process | Multiple separate processes |
+| **Support** | Unified | Fragmented across projects |
+
+### RubyMate vs. Language Server Protocol (LSP) Extensions
+
+| Feature | RubyMate | LSP-Based Extensions |
+|---------|----------|----------------------|
+| **Installation** | ✅ Install and go | ⚠️ Install extension + gem |
+| **Dependencies** | ✅ Self-contained | ❌ Requires ruby-lsp gem in every project |
+| **Navigation** | ✅ IDE-quality features | ✅ Basic LSP features |
+| **Rails Support** | ✅ Built-in deep integration | ⚠️ Limited or via add-ons |
+| **Debugging** | ✅ Integrated | ⚠️ Separate extension needed |
+| **Testing** | ✅ Visual Test Explorer | ⚠️ Separate extension needed |
+| **Reliability** | ✅ Single codebase | ⚠️ Multiple components can break |
 
 ---
 
-## 🤝 Contributing
+## Advanced Features
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+### Type Hierarchy
+
+Visualize class inheritance and module relationships:
+
+1. Place cursor on a class name
+2. Right-click → "Show Type Hierarchy"
+3. See inheritance chain, included modules, and all subclasses
+
+### Call Hierarchy
+
+Understand method call relationships:
+
+1. Place cursor on a method name
+2. Right-click → "Show Call Hierarchy"
+3. View incoming calls (who calls this method) and outgoing calls (what it calls)
+
+### Smart Search
+
+Context-aware search that understands Ruby code:
+
+1. Open command palette → "RubyMate: Smart Search"
+2. Type any symbol name
+3. Results ranked by relevance, usage frequency, and recency
+
+### Dead Code Detection
+
+Find unused code to keep your project clean:
+
+1. Command palette → "RubyMate: Detect Dead Code"
+2. Review list of potentially unused classes and methods
+3. Safely remove or refactor dead code
+
+---
+
+## Debugging Guide
+
+### Debug Current File
+
+1. Open a Ruby file
+2. Set breakpoints by clicking left of line numbers
+3. Press `F5` or use Run → Start Debugging
+4. Code execution pauses at breakpoints
+
+### Debug Rails Application
+
+1. Create launch configuration (F5 → "Create launch.json")
+2. Select "Debug Rails Server"
+3. Start debugging - Rails server runs in debug mode
+4. Visit routes in browser - execution pauses at breakpoints
+
+### Debug Tests
+
+**From Test Explorer:**
+1. Open Testing sidebar (beaker icon)
+2. Click debug icon next to any test
+3. Test runs with debugger attached
+
+**From Editor:**
+1. Open test file
+2. Place cursor in test
+3. Command palette → "Test: Debug Test at Cursor"
+
+---
+
+## Troubleshooting
+
+### Extension Not Activating
+
+- **Check Ruby installation**: Run `ruby -v` in terminal
+- **Verify project has Ruby files**: Extension activates on `.rb` files
+- **Check extension status**: View → Extensions → RubyMate → Check for errors
+
+### Navigation Not Working
+
+- **Wait for indexing**: First-time indexing takes 5-15 seconds
+- **Check file is saved**: Save file before using navigation features
+- **Reload window**: Command palette → "Developer: Reload Window"
+
+### Debugging Issues
+
+- **Install debug gem**: Add `gem 'debug'` to Gemfile (development group)
+- **Check Ruby version**: Debug gem requires Ruby 3.0+ (use byebug for Ruby 2.7)
+- **Verify launch configuration**: Check `.vscode/launch.json` is valid
+
+### Test Explorer Not Showing Tests
+
+- **Verify test framework**: RSpec or Minitest installed in project
+- **Check file patterns**: Tests in `spec/` or `test/` directories
+- **Refresh tests**: Click refresh icon in Test Explorer
+
+---
+
+## User Testimonials
+
+*Share your experience! If RubyMate has improved your Ruby development workflow, we'd love to hear from you. [Open a discussion](https://github.com/Balaji2682/rubymate/discussions) to share your story.*
+
+<!-- Testimonials will be added here as users share their experiences -->
+
+---
+
+## Roadmap
+
+We're continuously improving RubyMate. Upcoming features:
+
+- 🔄 Enhanced refactoring tools
+- 📈 Code metrics and complexity analysis
+- 🔍 Advanced search and replace with Ruby patterns
+- 🎯 AI-powered code suggestions
+- 📦 Bundler integration and gem management
+
+**Have a feature request?** [Open an issue](https://github.com/Balaji2682/rubymate/issues) on GitHub.
+
+---
+
+## Contributing
+
+Contributions are welcome! Here's how you can help:
+
+- 🐛 **Report bugs** - [Open an issue](https://github.com/Balaji2682/rubymate/issues)
+- 💡 **Suggest features** - [Start a discussion](https://github.com/Balaji2682/rubymate/discussions)
+- 🔧 **Submit pull requests** - See [CONTRIBUTING.md](https://github.com/Balaji2682/rubymate/blob/main/CONTRIBUTING.md)
+- ⭐ **Star the project** - Show your support on [GitHub](https://github.com/Balaji2682/rubymate)
+- 📢 **Spread the word** - Share with fellow Ruby developers
 
 ### Development Setup
 
@@ -374,56 +350,54 @@ npm run install:all
 # Build extension
 cd extension && npm run compile
 
-# Build gem
-cd ../gem && bundle install
-
-# Open in VS Code
-code .
-
-# Press F5 to launch Extension Development Host
+# Launch Extension Development Host
+# Press F5 in VS Code
 ```
 
 ---
 
-## 📝 Changelog
+## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
+See [CHANGELOG.md](https://github.com/Balaji2682/rubymate/blob/main/CHANGELOG.md) for detailed version history and release notes.
 
 ---
 
-## 🙏 Acknowledgments
+## Support & Resources
 
-Integrates with (optional):
-- [debug](https://github.com/ruby/debug) by Ruby core team - for debugging features
-- [rubocop](https://github.com/rubocop/rubocop) by RuboCop team - for linting and formatting
-
-Inspired by:
-- IDE's navigation features
-- Shopify's [ruby-lsp](https://github.com/Shopify/ruby-lsp) architecture
-
-Built with ❤️ for the Ruby community as a **self-contained**, **dependency-free** solution.
+- 📖 **Documentation** - [GitHub Wiki](https://github.com/Balaji2682/rubymate/wiki)
+- 💬 **Discussions** - [GitHub Discussions](https://github.com/Balaji2682/rubymate/discussions)
+- 🐛 **Bug Reports** - [GitHub Issues](https://github.com/Balaji2682/rubymate/issues)
+- 🔔 **Updates** - [Release Notes](https://github.com/Balaji2682/rubymate/releases)
+- ⭐ **Star on GitHub** - [github.com/Balaji2682/rubymate](https://github.com/Balaji2682/rubymate)
 
 ---
 
-## 📞 Support
+## License
 
-- 🐛 [Report Issues](https://github.com/Balaji2682/rubymate/issues)
-- 💬 [Discussions](https://github.com/Balaji2682/rubymate/discussions)
-- 📚 [Documentation](https://github.com/Balaji2682/rubymate/wiki)
-- ⭐ [Star on GitHub](https://github.com/Balaji2682/rubymate)
+MIT License - See [LICENSE](https://github.com/Balaji2682/rubymate/blob/main/LICENSE) for details.
+
+---
+
+## Acknowledgments
+
+RubyMate integrates with and is inspired by excellent Ruby tools:
+
+- **[Ruby Debug](https://github.com/ruby/debug)** - Official Ruby debugger by the Ruby core team
+- **[RuboCop](https://github.com/rubocop/rubocop)** - Ruby static code analyzer and formatter
+- **[Ruby LSP](https://github.com/Shopify/ruby-lsp)** - Shopify's language server architecture inspiration
+
+Built with ❤️ for the Ruby community.
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for the Ruby community**
+### Ready to enhance your Ruby development?
 
-[Install Now](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate) | [GitHub](https://github.com/Balaji2682/rubymate) | [Report Issue](https://github.com/Balaji2682/rubymate/issues)
+[![Install Now](https://img.shields.io/badge/Install-VS%20Code%20Marketplace-blue?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+[![View on GitHub](https://img.shields.io/badge/View-GitHub-black?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate)
+[![Report Issue](https://img.shields.io/badge/Report-Issue-red?style=for-the-badge&logo=github)](https://github.com/Balaji2682/rubymate/issues)
+
+**One extension. Complete solution. Start building better Ruby applications today.**
 
 </div>
