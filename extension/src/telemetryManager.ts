@@ -343,7 +343,8 @@ export class TelemetryManager {
 
         // Send to telemetry if enabled
         try {
-            this.telemetryReporter?.sendErrorTelemetry(errorType, {
+            this.telemetryReporter?.logUsage('error', {
+                errorType,
                 feature,
                 sessionId: this.sessionId,
                 errorMessage: error?.message,

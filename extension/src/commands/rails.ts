@@ -106,41 +106,137 @@ export class RailsCommands {
         if (!workspaceFolder) return;
 
         let modelName: string | undefined;
+        let namespace = '';
 
-        // Extract model name based on current file type
+        // Extract model name and namespace based on current file type
         if (currentFile.includes('/controllers/')) {
-            const match = currentFile.match(/(\w+)_controller\.rb$/);
-            if (match) {
-                modelName = this.singularize(match[1]);
-            }
+            const { namespace: ns, basename } = this.extractNamespace(currentFile);
+            namespace = ns;
+            modelName = this.singularize(basename);
         } else if (currentFile.includes('/views/')) {
             const parts = currentFile.split('/views/');
             if (parts[1]) {
-                modelName = this.singularize(parts[1].split('/')[0]);
+                const viewPath = parts[1];
+                const pathParts = viewPath.split('/');
+
+                // Handle namespaced views (e.g., admin/users/index.html.erb)
+                if (pathParts.length > 2) {
+                    namespace = pathParts.slice(0, -2).map(p =>
+                        p.charAt(0).toUpperCase() + p.slice(1)
+                    ).join('::');
+                    modelName = this.singularize(pathParts[pathParts.length - 2]);
+                } else {
+                    modelName = this.singularize(pathParts[0]);
+                }
             }
         }
 
         if (!modelName) {
             modelName = await vscode.window.showInputBox({
-                prompt: 'Enter model name',
+                prompt: 'Enter model name (e.g., User or Admin::User)',
                 placeHolder: 'User'
             });
         }
 
         if (!modelName) return;
 
-        const modelPath = path.join(
-            workspaceFolder.uri.fsPath,
-            'app',
-            'models',
-            `${modelName.toLowerCase()}.rb`
-        );
+        // Handle fully qualified names (Admin::User)
+        if (modelName.includes('::')) {
+            const parts = modelName.split('::');
+            namespace = parts.slice(0, -1).join('::');
+            modelName = parts[parts.length - 1];
+        }
 
-        try {
-            const document = await vscode.workspace.openTextDocument(modelPath);
-            await vscode.window.showTextDocument(document);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Model not found: ${modelName}`);
+        // Try multiple strategies to find the model
+        let foundPath: string | null = null;
+
+        // Strategy 1: Exact path with namespace
+        if (namespace) {
+            const namespacePath = namespace.toLowerCase().replace(/::/g, '/');
+            const exactPath = path.join(
+                workspaceFolder.uri.fsPath,
+                'app',
+                'models',
+                namespacePath,
+                `${modelName.toLowerCase()}.rb`
+            );
+            if (fs.existsSync(exactPath)) {
+                foundPath = exactPath;
+            }
+        }
+
+        // Strategy 2: Direct path without namespace
+        if (!foundPath) {
+            const directPath = path.join(
+                workspaceFolder.uri.fsPath,
+                'app',
+                'models',
+                `${modelName.toLowerCase()}.rb`
+            );
+            if (fs.existsSync(directPath)) {
+                foundPath = directPath;
+            }
+        }
+
+        // Strategy 3: Fuzzy search across all models
+        if (!foundPath) {
+            const modelFiles = await this.findFilesFuzzy(
+                workspaceFolder,
+                `app/models/**/${modelName.toLowerCase()}.rb`
+            );
+
+            if (modelFiles.length > 0) {
+                if (modelFiles.length === 1) {
+                    foundPath = modelFiles[0].fsPath;
+                } else {
+                    // Multiple matches - let user choose
+                    const choices = modelFiles.map(file => ({
+                        label: path.relative(workspaceFolder.uri.fsPath, file.fsPath),
+                        path: file.fsPath
+                    }));
+
+                    const selected = await vscode.window.showQuickPick(choices, {
+                        placeHolder: 'Multiple models found. Select one:'
+                    });
+
+                    if (selected) {
+                        foundPath = selected.path;
+                    }
+                }
+            }
+        }
+
+        // Strategy 4: Search by class name in file content
+        if (!foundPath) {
+            const allModels = await this.findFilesFuzzy(workspaceFolder, 'app/models/**/*.rb');
+            const targetClassName = namespace
+                ? `${namespace}::${modelName}`
+                : modelName;
+
+            for (const file of allModels) {
+                const className = await this.getClassNameFromFile(file.fsPath);
+                if (className &&
+                    (className === targetClassName ||
+                     className.endsWith(`::${modelName}`) ||
+                     className.toLowerCase().includes(modelName.toLowerCase()))) {
+                    foundPath = file.fsPath;
+                    break;
+                }
+            }
+        }
+
+        // Open the file if found
+        if (foundPath) {
+            try {
+                const document = await vscode.workspace.openTextDocument(foundPath);
+                await vscode.window.showTextDocument(document);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to open model: ${modelName}`);
+            }
+        } else {
+            vscode.window.showErrorMessage(
+                `Model not found: ${namespace ? namespace + '::' : ''}${modelName}`
+            );
         }
     }
 
@@ -153,41 +249,137 @@ export class RailsCommands {
         if (!workspaceFolder) return;
 
         let controllerName: string | undefined;
+        let namespace = '';
 
-        // Extract controller name based on current file type
+        // Extract controller name and namespace based on current file type
         if (currentFile.includes('/models/')) {
-            const match = currentFile.match(/(\w+)\.rb$/);
-            if (match) {
-                controllerName = this.pluralize(match[1]);
-            }
+            const { namespace: ns, basename } = this.extractNamespace(currentFile);
+            namespace = ns;
+            controllerName = this.pluralize(basename);
         } else if (currentFile.includes('/views/')) {
             const parts = currentFile.split('/views/');
             if (parts[1]) {
-                controllerName = parts[1].split('/')[0];
+                const viewPath = parts[1];
+                const pathParts = viewPath.split('/');
+
+                // Handle namespaced views (e.g., admin/users/index.html.erb)
+                if (pathParts.length > 2) {
+                    namespace = pathParts.slice(0, -2).map(p =>
+                        p.charAt(0).toUpperCase() + p.slice(1)
+                    ).join('::');
+                    controllerName = pathParts[pathParts.length - 2];
+                } else {
+                    controllerName = pathParts[0];
+                }
             }
         }
 
         if (!controllerName) {
             controllerName = await vscode.window.showInputBox({
-                prompt: 'Enter controller name (plural)',
+                prompt: 'Enter controller name (e.g., Users or Admin::Users)',
                 placeHolder: 'users'
             });
         }
 
         if (!controllerName) return;
 
-        const controllerPath = path.join(
-            workspaceFolder.uri.fsPath,
-            'app',
-            'controllers',
-            `${controllerName.toLowerCase()}_controller.rb`
-        );
+        // Handle fully qualified names (Admin::UsersController)
+        if (controllerName.includes('::')) {
+            const parts = controllerName.split('::');
+            namespace = parts.slice(0, -1).join('::');
+            controllerName = parts[parts.length - 1].replace(/Controller$/, '');
+        }
 
-        try {
-            const document = await vscode.workspace.openTextDocument(controllerPath);
-            await vscode.window.showTextDocument(document);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Controller not found: ${controllerName}`);
+        // Try multiple strategies to find the controller
+        let foundPath: string | null = null;
+
+        // Strategy 1: Exact path with namespace
+        if (namespace) {
+            const namespacePath = namespace.toLowerCase().replace(/::/g, '/');
+            const exactPath = path.join(
+                workspaceFolder.uri.fsPath,
+                'app',
+                'controllers',
+                namespacePath,
+                `${controllerName.toLowerCase()}_controller.rb`
+            );
+            if (fs.existsSync(exactPath)) {
+                foundPath = exactPath;
+            }
+        }
+
+        // Strategy 2: Direct path without namespace
+        if (!foundPath) {
+            const directPath = path.join(
+                workspaceFolder.uri.fsPath,
+                'app',
+                'controllers',
+                `${controllerName.toLowerCase()}_controller.rb`
+            );
+            if (fs.existsSync(directPath)) {
+                foundPath = directPath;
+            }
+        }
+
+        // Strategy 3: Fuzzy search across all controllers
+        if (!foundPath) {
+            const controllerFiles = await this.findFilesFuzzy(
+                workspaceFolder,
+                `app/controllers/**/${controllerName.toLowerCase()}_controller.rb`
+            );
+
+            if (controllerFiles.length > 0) {
+                if (controllerFiles.length === 1) {
+                    foundPath = controllerFiles[0].fsPath;
+                } else {
+                    // Multiple matches - let user choose
+                    const choices = controllerFiles.map(file => ({
+                        label: path.relative(workspaceFolder.uri.fsPath, file.fsPath),
+                        path: file.fsPath
+                    }));
+
+                    const selected = await vscode.window.showQuickPick(choices, {
+                        placeHolder: 'Multiple controllers found. Select one:'
+                    });
+
+                    if (selected) {
+                        foundPath = selected.path;
+                    }
+                }
+            }
+        }
+
+        // Strategy 4: Search by class name in file content
+        if (!foundPath) {
+            const allControllers = await this.findFilesFuzzy(workspaceFolder, 'app/controllers/**/*.rb');
+            const targetClassName = namespace
+                ? `${namespace}::${controllerName}Controller`
+                : `${controllerName}Controller`;
+
+            for (const file of allControllers) {
+                const className = await this.getClassNameFromFile(file.fsPath);
+                if (className &&
+                    (className === targetClassName ||
+                     className.endsWith(`::${controllerName}Controller`) ||
+                     className.toLowerCase().includes(controllerName.toLowerCase()))) {
+                    foundPath = file.fsPath;
+                    break;
+                }
+            }
+        }
+
+        // Open the file if found
+        if (foundPath) {
+            try {
+                const document = await vscode.workspace.openTextDocument(foundPath);
+                await vscode.window.showTextDocument(document);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to open controller: ${controllerName}`);
+            }
+        } else {
+            vscode.window.showErrorMessage(
+                `Controller not found: ${namespace ? namespace + '::' : ''}${controllerName}Controller`
+            );
         }
     }
 
@@ -772,27 +964,134 @@ export class RailsCommands {
     }
 
     private singularize(word: string): string {
-        // Simple singularization
+        // Improved singularization with irregular plurals
+        const irregularMap: { [key: string]: string } = {
+            'people': 'person',
+            'men': 'man',
+            'women': 'woman',
+            'children': 'child',
+            'teeth': 'tooth',
+            'feet': 'foot',
+            'mice': 'mouse',
+            'geese': 'goose'
+        };
+
+        const lower = word.toLowerCase();
+        if (irregularMap[lower]) {
+            return irregularMap[lower];
+        }
+
+        // Handle regular patterns
         if (word.endsWith('ies')) {
             return word.slice(0, -3) + 'y';
         }
-        if (word.endsWith('es')) {
+        if (word.endsWith('ves')) {
+            return word.slice(0, -3) + 'f';
+        }
+        if (word.endsWith('oes')) {
             return word.slice(0, -2);
         }
-        if (word.endsWith('s')) {
+        if (word.endsWith('sses') || word.endsWith('xes') || word.endsWith('ches') || word.endsWith('shes')) {
+            return word.slice(0, -2);
+        }
+        if (word.endsWith('s') && !word.endsWith('ss')) {
             return word.slice(0, -1);
         }
         return word;
     }
 
     private pluralize(word: string): string {
-        // Simple pluralization
-        if (word.endsWith('y')) {
+        // Improved pluralization with irregular plurals
+        const irregularMap: { [key: string]: string } = {
+            'person': 'people',
+            'man': 'men',
+            'woman': 'women',
+            'child': 'children',
+            'tooth': 'teeth',
+            'foot': 'feet',
+            'mouse': 'mice',
+            'goose': 'geese'
+        };
+
+        const lower = word.toLowerCase();
+        if (irregularMap[lower]) {
+            return irregularMap[lower];
+        }
+
+        // Handle regular patterns
+        if (word.endsWith('y') && !'aeiou'.includes(word[word.length - 2])) {
             return word.slice(0, -1) + 'ies';
         }
-        if (word.endsWith('s') || word.endsWith('x') || word.endsWith('ch') || word.endsWith('sh')) {
+        if (word.endsWith('f')) {
+            return word.slice(0, -1) + 'ves';
+        }
+        if (word.endsWith('fe')) {
+            return word.slice(0, -2) + 'ves';
+        }
+        if (word.endsWith('o') && !'aeiou'.includes(word[word.length - 2])) {
+            return word + 'es';
+        }
+        if (word.endsWith('s') || word.endsWith('x') || word.endsWith('ch') || word.endsWith('sh') || word.endsWith('z')) {
             return word + 'es';
         }
         return word + 's';
+    }
+
+    /**
+     * Find files using glob pattern with fuzzy matching
+     */
+    private async findFilesFuzzy(workspaceFolder: vscode.WorkspaceFolder, pattern: string): Promise<vscode.Uri[]> {
+        try {
+            return await vscode.workspace.findFiles(
+                new vscode.RelativePattern(workspaceFolder, pattern),
+                '**/node_modules/**',
+                100
+            );
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Extract class name from file content
+     */
+    private async getClassNameFromFile(filePath: string): Promise<string | null> {
+        try {
+            const document = await vscode.workspace.openTextDocument(filePath);
+            const text = document.getText();
+
+            // Match class definition with optional namespace
+            const classMatch = text.match(/class\s+([\w:]+)/);
+            if (classMatch) {
+                return classMatch[1];
+            }
+        } catch {
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * Parse namespace from file path or content
+     */
+    private extractNamespace(filePath: string): { namespace: string; basename: string } {
+        const relativePath = filePath.split('/app/')[1];
+        if (!relativePath) {
+            return { namespace: '', basename: path.basename(filePath, '.rb') };
+        }
+
+        const parts = relativePath.split('/');
+        const basename = path.basename(filePath, '.rb').replace('_controller', '');
+
+        // Extract namespace from directory structure (e.g., admin/users_controller.rb)
+        if (parts.length > 2) {
+            const namespaceParts = parts.slice(1, -1);
+            return {
+                namespace: namespaceParts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('::'),
+                basename
+            };
+        }
+
+        return { namespace: '', basename };
     }
 }

@@ -23,6 +23,7 @@ import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rub
 import { ConfigValidator } from './configValidator';
 import { StatusBarManager, ExtensionState } from './statusBarManager';
 import { TelemetryManager } from './telemetryManager';
+import { RatingReminderManager } from './ratingReminder';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -49,6 +50,9 @@ let statusBarManager: StatusBarManager;
 
 // Telemetry (privacy-respecting)
 let telemetryManager: TelemetryManager;
+
+// Rating reminder
+let ratingReminderManager: RatingReminderManager;
 
 // Database features
 let schemaParser: SchemaParser;
@@ -77,6 +81,11 @@ export async function activate(context: vscode.ExtensionContext) {
             await telemetryManager.dispose();
         }
     });
+
+    // Initialize rating reminder (non-intrusive)
+    ratingReminderManager = new RatingReminderManager(context);
+    await ratingReminderManager.initialize();
+    outputChannel.appendLine('[RATING] Rating reminder initialized');
 
     // ========== PHASE 0: Configuration Validation (Critical) ==========
     // Validate configuration before initializing other features
@@ -642,6 +651,9 @@ function registerCommands(context: vscode.ExtensionContext) {
             return;
         }
 
+        // Track feature usage for rating reminder
+        await ratingReminderManager.trackFeatureUse();
+
         const config = vscode.workspace.getConfiguration('rubymate');
         const testFramework = config.get<string>('testFramework', 'auto');
         const currentFile = editor.document.uri.fsPath;
@@ -683,6 +695,9 @@ function registerCommands(context: vscode.ExtensionContext) {
         if (!editor) {
             return;
         }
+
+        // Track feature usage for rating reminder
+        await ratingReminderManager.trackFeatureUse();
 
         const currentFile = editor.document.uri.fsPath;
 
@@ -754,6 +769,25 @@ function registerCommands(context: vscode.ExtensionContext) {
         await telemetryManager.clearData();
     });
 
+    // Rating reminder commands (for testing/debugging)
+    const showRatingReminderCommand = vscode.commands.registerCommand('rubymate.showRatingReminder', async () => {
+        await ratingReminderManager.showNow();
+    });
+
+    const ratingReminderStatusCommand = vscode.commands.registerCommand('rubymate.ratingReminderStatus', () => {
+        const status = ratingReminderManager.getStatus();
+        const message = [
+            '**Rating Reminder Status**',
+            '',
+            `Install Date: ${status.installDate ? new Date(status.installDate).toLocaleDateString() : 'Not set'}`,
+            `Days Since Install: ${Math.floor(status.daysSinceInstall)}`,
+            `Feature Uses: ${status.featureCount}`,
+            `Dismissed: ${status.dismissed ? 'Yes' : 'No'}`,
+            `Last Shown Version: ${status.lastShownVersion || 'Never shown'}`
+        ].join('\n');
+        vscode.window.showInformationMessage(message, { modal: true });
+    });
+
     // Show Rails commands palette
     const showRailsCommandsCommand = vscode.commands.registerCommand('rubymate.rails.showCommands', async () => {
         const commands = [
@@ -796,6 +830,8 @@ function registerCommands(context: vscode.ExtensionContext) {
         showTelemetryCommand,
         exportTelemetryCommand,
         clearTelemetryCommand,
+        showRatingReminderCommand,
+        ratingReminderStatusCommand,
         showRailsCommandsCommand
     );
 }

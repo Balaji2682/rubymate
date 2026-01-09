@@ -1,27 +1,44 @@
-# RubyMate - All-in-One Ruby & Rails IDE for VS Code
+# Ruby - Complete Ruby and Rails Extension for VS Code
 
 [![Version](https://img.shields.io/visual-studio-marketplace/v/BalajiR.rubymate?style=flat-square&label=version)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![License](https://img.shields.io/github/license/Balaji2682/rubymate?style=flat-square)](https://github.com/Balaji2682/rubymate/blob/main/LICENSE)
 
-> **A complete, self-contained Ruby and Rails development environment for Visual Studio Code.** Everything you need for professional Ruby development in a single extension - no complex setup, no external dependencies, just install and start coding.
+**The ultimate Ruby extension and Rails extension for Visual Studio Code.** Complete Ruby language support with IntelliSense, debugging, testing (RSpec, Minitest), Rails navigation, RuboCop formatting, and code intelligence.
+
+## Features
+
+✅ **Ruby IntelliSense** - Smart code completion with Solargraph
+✅ **Visual Debugger** - Debug Ruby and Rails apps with breakpoints (rdbg)
+✅ **Test Explorer** - Run and debug RSpec & Minitest tests visually
+✅ **Rails Navigation** - Jump between models, controllers, views, migrations
+✅ **RuboCop Integration** - Auto-format and lint your Ruby code
+✅ **Go to Definition** - Navigate to method and class definitions
+✅ **Find References** - Find all usages of symbols
+✅ **ActiveRecord Intelligence** - Smart completion for Rails models
+✅ **Ruby Syntax Highlighting** - Full Ruby language support
 
 ---
 
-## Why RubyMate?
+## Quick Start
 
-**One Extension. Complete Solution.**
+### Installation
 
-Instead of installing and configuring multiple extensions, language servers, and dependencies, RubyMate provides a unified, professional development environment out of the box.
+1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
+2. Install required Ruby gems:
+   ```bash
+   gem install solargraph rubocop debug
+   ```
+3. Open any Ruby or Rails project
+4. Start coding! IntelliSense, debugging, and testing work immediately
 
-### Key Benefits
+### First Steps
 
-- **Works Immediately** - No gems to install, no LSP servers to configure
-- **All-in-One** - Navigation, debugging, testing, linting, and Rails support in one package
-- **Zero Config** - Auto-detects Ruby version managers (rbenv, rvm, chruby, asdf)
-- **Rails Native** - Deep integration with Ruby on Rails projects
-- **Performance Focused** - Fast indexing and responsive navigation
+- **Code Completion**: Type and see Ruby IntelliSense suggestions
+- **Debug**: Press `F5` to debug your Ruby file
+- **Test Explorer**: Click the beaker icon to see all your RSpec/Minitest tests
+- **Rails Commands**: Click the Ruby icon in the status bar for Rails features
 
 ---
 
