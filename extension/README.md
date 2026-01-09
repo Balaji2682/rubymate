@@ -13,6 +13,7 @@
 ✅ **Visual Debugger** - Debug Ruby and Rails apps with breakpoints (rdbg)
 ✅ **Test Explorer** - Run and debug RSpec & Minitest tests visually
 ✅ **Rails Navigation** - Jump between models, controllers, views, migrations
+✅ **Template Intelligence** - ERB/Haml/Slim with Rails helpers, path helpers, and smart navigation
 ✅ **RuboCop Integration** - Auto-format and lint your Ruby code
 ✅ **Go to Definition** - Navigate to method and class definitions
 ✅ **Find References** - Find all usages of symbols
@@ -104,6 +105,46 @@ Built-in tools to maintain code quality:
 - **N+1 Query Detection** - Identify potential performance issues in ActiveRecord queries
 - **Dead Code Detection** - Find unused classes, methods, and constants
 - **Code Snippets** - 40+ Ruby and Rails snippets for faster coding
+
+### Template Intelligence
+
+Professional-grade ERB, Haml, and Slim template editing with complete Rails integration:
+
+**Smart Completions:**
+- **60+ Rails Helpers** - IntelliSense for `link_to`, `form_with`, `render`, `image_tag`, and more
+- **Path Helpers from Routes** - Auto-complete `user_path`, `edit_user_path`, `new_admin_user_path`, etc.
+- **Instance Variables** - Completion for `@user`, `@posts` from controller context
+- **I18n Keys** - Translation key completion for `t('.key')` from locale files
+- **Smart Snippets** - Tab-complete helpers with proper argument placeholders
+
+**Go to Definition:**
+- **String Partials** - `render 'users/form'` → jumps to `_form.html.erb`
+- **Model-Based** - `render @user` → jumps to `_user.html.erb`
+- **Collections** - `render @users` → jumps to `_user.html.erb` (singularized)
+- **Layouts** - `render layout: 'admin'` → jumps to `layouts/admin.html.erb`
+- **Custom Helpers** - `current_user`, `admin?` → jumps to helper definition
+- **Path Helpers** - `user_path` → jumps to route definition in `routes.rb`
+
+**Pattern Support:**
+```erb
+<!-- All these patterns work -->
+<%= render 'shared/header' %>
+<%= render partial: 'form', locals: { user: @user } %>
+<%= render @user %>
+<%= render @users %>
+<%= render layout: 'admin' %>
+<%= render template: 'users/show' %>
+<%= render file: '/path/to/file' %>
+
+<!-- Path helpers with IntelliSense -->
+<%= link_to 'Profile', user_path(@user) %>
+<%= link_to 'Edit', edit_user_path(@user) %>
+
+<!-- Custom helpers navigate to definition -->
+<% if current_user.admin? %>
+  <%= render 'admin/dashboard' %>
+<% end %>
+```
 
 ---
 

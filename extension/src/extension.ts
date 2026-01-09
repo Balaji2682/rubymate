@@ -20,6 +20,9 @@ import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
 import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
 import { RubyFormattingProvider } from './providers/rubyFormattingProvider';
 import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rubyAutoEndProvider';
+import { EnhancedTemplateCompletionProvider } from './providers/enhancedTemplateCompletionProvider';
+import { EnhancedTemplateDefinitionProvider } from './providers/enhancedTemplateDefinitionProvider';
+import { TemplateHoverProvider } from './providers/templateDefinitionProvider';
 import { ConfigValidator } from './configValidator';
 import { StatusBarManager, ExtensionState } from './statusBarManager';
 import { TelemetryManager } from './telemetryManager';
@@ -556,6 +559,52 @@ function registerProviders(context: vscode.ExtensionContext) {
             '\n', ' ' // Trigger on newline and space
         )
     );
+
+    // ========== TEMPLATE INTELLIGENCE (Professional IDE-level) ==========
+    // ERB, Haml, and Slim template support with comprehensive features
+    const templateLanguages = [
+        { scheme: 'file', language: 'erb' },
+        { scheme: 'file', language: 'haml' },
+        { scheme: 'file', language: 'slim' }
+    ];
+
+    // Enhanced template completion provider
+    // Provides: Rails helpers, path helpers from routes, instance vars, I18n keys
+    const templateCompletionProvider = new EnhancedTemplateCompletionProvider();
+    for (const selector of templateLanguages) {
+        context.subscriptions.push(
+            vscode.languages.registerCompletionItemProvider(
+                selector,
+                templateCompletionProvider,
+                '<', '%', '=', '-', ' ', '@', '_' // Trigger on ERB tags, Ruby code, and special chars
+            )
+        );
+    }
+
+    // Enhanced template definition provider
+    // Handles: render 'partial', render @object, render @collection, custom helpers, path helpers
+    const templateDefinitionProvider = new EnhancedTemplateDefinitionProvider();
+    for (const selector of templateLanguages) {
+        context.subscriptions.push(
+            vscode.languages.registerDefinitionProvider(selector, templateDefinitionProvider)
+        );
+    }
+
+    // Template hover provider
+    const templateHoverProvider = new TemplateHoverProvider();
+    for (const selector of templateLanguages) {
+        context.subscriptions.push(
+            vscode.languages.registerHoverProvider(selector, templateHoverProvider)
+        );
+    }
+
+    outputChannel.appendLine('✓ Enhanced template intelligence registered (Professional IDE-level)');
+    outputChannel.appendLine('  - Rails helpers completion (60+ helpers)');
+    outputChannel.appendLine('  - Path helpers from routes (user_path, edit_user_path, etc.)');
+    outputChannel.appendLine('  - Instance variable completion from controllers');
+    outputChannel.appendLine('  - Go to definition: render @object, render "partial", custom helpers');
+    outputChannel.appendLine('  - I18n translation key completion');
+    outputChannel.appendLine('  - Smart partial resolution (layouts, files, model-based)');
 
     // Format on save (if enabled)
     context.subscriptions.push(

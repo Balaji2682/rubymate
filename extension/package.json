@@ -1,7 +1,7 @@
 {
   "name": "rubymate",
   "displayName": "Ruby - Complete Ruby and Rails Extension",
-  "description": "The ultimate Ruby and Rails extension for VS Code. Features: Solargraph IntelliSense, Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
+  "description": "The ultimate Ruby and Rails extension for VS Code. Features: Solargraph IntelliSense, Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, ERB/Haml/Slim Template Intelligence with path helpers, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
   "version": "0.2.5",
   "publisher": "BalajiR",
   "icon": "images/icon.png",
@@ -56,6 +56,12 @@
     "ruby tools",
     "rails tools",
     "erb",
+    "erb intellisense",
+    "haml",
+    "slim",
+    "rails templates",
+    "rails helpers",
+    "path helpers",
     "bundler",
     "gem",
     "rake",
@@ -85,7 +91,13 @@
   ],
   "activationEvents": [
     "onLanguage:ruby",
-    "workspaceContains:**/*.rb"
+    "onLanguage:erb",
+    "onLanguage:haml",
+    "onLanguage:slim",
+    "workspaceContains:**/*.rb",
+    "workspaceContains:**/*.erb",
+    "workspaceContains:**/*.haml",
+    "workspaceContains:**/*.slim"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -103,6 +115,44 @@
           "Ruby",
           "ruby"
         ]
+      },
+      {
+        "id": "erb",
+        "extensions": [
+          ".erb",
+          ".html.erb",
+          ".text.erb"
+        ],
+        "aliases": [
+          "ERB",
+          "Embedded Ruby",
+          "erb"
+        ],
+        "configuration": "./language-configurations/erb.json"
+      },
+      {
+        "id": "haml",
+        "extensions": [
+          ".haml",
+          ".html.haml"
+        ],
+        "aliases": [
+          "Haml",
+          "haml"
+        ],
+        "configuration": "./language-configurations/haml.json"
+      },
+      {
+        "id": "slim",
+        "extensions": [
+          ".slim",
+          ".html.slim"
+        ],
+        "aliases": [
+          "Slim",
+          "slim"
+        ],
+        "configuration": "./language-configurations/slim.json"
       }
     ],
     "keybindings": [
