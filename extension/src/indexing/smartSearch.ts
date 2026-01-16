@@ -1,9 +1,16 @@
 import * as vscode from 'vscode';
 import { SemanticGraphBuilder } from './semanticGraph';
 import { RubySymbol } from '../advancedIndexer';
+import { ScoredPriorityQueue } from '../shared/dataStructures/priorityQueue';
+import { LRUCache } from '../shared/dataStructures/lruCache';
+import { Trie } from '../shared/dataStructures/trie';
 
 /**
  * Smart Search Engine with Context-Aware Ranking
+ *
+ * Performance enhancements:
+ * - Uses ScoredPriorityQueue for efficient top-N result extraction
+ * - Uses LRUCache for search result caching
  */
 
 export interface SearchResult {
@@ -46,6 +53,12 @@ export class SmartSearchEngine {
     private usageStats: Map<string, UsageStats> = new Map();
     private recentlyAccessed: Map<string, number> = new Map(); // symbolId → timestamp
 
+    // Performance: Cache recent search results (100 entries, 30 second TTL)
+    private searchCache: LRUCache<string, SearchResult[]>;
+
+    // Performance: Trie for O(k) prefix-based symbol lookups
+    private symbolTrie: Trie<RubySymbol>;
+
     // Weights for different ranking factors
     private weights = {
         exactMatch: 100,
@@ -62,13 +75,39 @@ export class SmartSearchEngine {
 
     constructor(graphBuilder: SemanticGraphBuilder) {
         this.graphBuilder = graphBuilder;
+        // Performance: Initialize search result cache (100 entries, 30s TTL)
+        this.searchCache = new LRUCache<string, SearchResult[]>({ maxSize: 100, maxAge: 30000 });
+        // Performance: Initialize Trie for fast prefix lookups
+        this.symbolTrie = new Trie<RubySymbol>();
     }
 
     /**
      * Add symbols to the search index
+     * Performance: Also adds symbols to Trie for O(k) prefix lookups
      */
     indexSymbols(uri: string, symbols: RubySymbol[]): void {
+        // Remove old symbols from Trie before adding new ones
+        const oldSymbols = this.symbols.get(uri);
+        if (oldSymbols) {
+            for (const symbol of oldSymbols) {
+                this.symbolTrie.remove(symbol.name.toLowerCase());
+            }
+        }
+
         this.symbols.set(uri, symbols);
+
+        // Performance: Add symbols to Trie for fast prefix lookups
+        for (const symbol of symbols) {
+            // Add lowercase version for case-insensitive search
+            this.symbolTrie.insert(symbol.name.toLowerCase(), symbol);
+            // Also add original case for exact match scenarios
+            if (symbol.name !== symbol.name.toLowerCase()) {
+                this.symbolTrie.insert(symbol.name, symbol);
+            }
+        }
+
+        // Performance: Invalidate cache when symbols change
+        this.searchCache.clear();
 
         // Initialize usage stats for new symbols
         for (const symbol of symbols) {
@@ -83,30 +122,56 @@ export class SmartSearchEngine {
     }
 
     /**
+     * Generate cache key for search query
+     */
+    private getCacheKey(query: string, context: SearchContext): string {
+        return `${query}:${context.fileType || ''}:${context.searchType || ''}:${context.currentFile?.toString() || ''}`;
+    }
+
+    /**
      * Search for symbols with smart ranking
+     * Performance: Uses LRUCache for caching and ScoredPriorityQueue for efficient top-N
      */
     search(query: string, context: SearchContext, limit: number = 50): SearchResult[] {
+        // Performance: Check cache first
+        const cacheKey = this.getCacheKey(query, context);
+        const cached = this.searchCache.get(cacheKey);
+        if (cached) {
+            return cached.slice(0, limit);
+        }
+
         const allSymbols = this.getAllSymbols();
-        const results: SearchResult[] = [];
+
+        // Performance: Use ScoredPriorityQueue for efficient top-N extraction
+        // This is O(n log k) instead of O(n log n) for full sort
+        const priorityQueue = new ScoredPriorityQueue<{ symbol: RubySymbol; reasons: RankingReason[] }>({ maxSize: limit });
 
         for (const symbol of allSymbols) {
             const score = this.calculateScore(symbol, query, context);
 
             if (score > 0) {
                 const reasons = this.getRankingReasons(symbol, query, context);
-                results.push({ symbol, score, reasons });
+                priorityQueue.addWithScore({ symbol, reasons }, score);
             }
         }
 
-        // Sort by score descending
-        results.sort((a, b) => b.score - a.score);
+        // Extract top results from priority queue with scores
+        const topItems = priorityQueue.getAllWithScores();
+        const results: SearchResult[] = topItems.slice(0, limit).map(scoredItem => ({
+            symbol: scoredItem.item.symbol,
+            score: scoredItem.score,
+            reasons: scoredItem.item.reasons
+        }));
 
         // Record access for top results
-        results.slice(0, limit).forEach(r => {
+        results.forEach(r => {
             this.recordAccess(r.symbol);
         });
 
-        return results.slice(0, limit);
+        // Performance: Cache results
+        this.searchCache.set(cacheKey, results);
+
+        return results;
     }
 
     /**
@@ -433,10 +498,31 @@ export class SmartSearchEngine {
     }
 
     /**
+     * Fast prefix search using Trie
+     * Performance: O(k) where k is the prefix length
+     */
+    searchByPrefix(prefix: string, limit: number = 50): RubySymbol[] {
+        const lowerPrefix = prefix.toLowerCase();
+        const results = this.symbolTrie.searchPrefix(lowerPrefix, limit);
+        return results;
+    }
+
+    /**
+     * Get autocomplete suggestions using Trie
+     * Performance: O(k + m) where k is prefix length and m is number of suggestions
+     */
+    getAutocompleteSuggestions(prefix: string, limit: number = 20): string[] {
+        const suggestions = this.symbolTrie.getSuggestions(prefix.toLowerCase(), limit);
+        return suggestions.map(s => s.key);
+    }
+
+    /**
      * Clear the index
      */
     clear(): void {
         this.symbols.clear();
+        this.searchCache.clear();
+        this.symbolTrie.clear();
     }
 
     /**

@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
+import { SymbolIndex, IndexedSymbol } from './shared/indexes/symbolIndex';
+import { RangeTree } from './shared/dataStructures/intervalTree';
 
 export interface RubySymbol {
     name: string;
@@ -60,6 +62,12 @@ export class AdvancedRubyIndexer {
     private fileMetadata: Map<string, FileMetadata> = new Map();
     private gemPaths: Set<string> = new Set();
 
+    // Performance: Use optimized SymbolIndex for fast lookups (O(1) by name, O(k) prefix search)
+    private symbolIndex: SymbolIndex;
+
+    // Performance: Use RangeTree for fast position-based symbol lookup
+    private fileRangeTrees: Map<string, RangeTree<RubySymbol>> = new Map();
+
     private indexing: boolean = false;
     private indexQueue: vscode.Uri[] = [];
     private outputChannel: vscode.OutputChannel;
@@ -81,6 +89,8 @@ export class AdvancedRubyIndexer {
     constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
         this.context = context;
         this.outputChannel = outputChannel;
+        // Performance: Initialize SymbolIndex with expected ~50k symbols for optimal bloom filter sizing
+        this.symbolIndex = new SymbolIndex(50000);
     }
 
     async initialize(): Promise<void> {
@@ -397,16 +407,42 @@ export class AdvancedRubyIndexer {
             const document = await vscode.workspace.openTextDocument(uri);
             const content = await vscode.workspace.fs.readFile(uri);
             const checksum = this.calculateChecksum(content);
+            const uriStr = uri.toString();
 
             // Extract symbols with advanced parsing
             const symbols = await this.extractSymbolsAdvanced(document);
 
             if (symbols.length > 0) {
-                this.symbols.set(uri.toString(), symbols);
+                // Performance: Remove old symbols from SymbolIndex before adding new ones
+                this.symbolIndex.removeFileSymbols(uriStr);
+
+                this.symbols.set(uriStr, symbols);
+
+                // Performance: Add symbols to optimized SymbolIndex for fast lookups
+                const indexedSymbols: IndexedSymbol[] = symbols.map(s => ({
+                    name: s.name,
+                    kind: s.kind,
+                    location: s.location,
+                    containerName: s.containerName,
+                    detail: s.detail,
+                    fullyQualifiedName: s.containerName ? `${s.containerName}::${s.name}` : s.name
+                }));
+                this.symbolIndex.addSymbols(indexedSymbols);
+
+                // Performance: Build RangeTree for fast position-based lookups
+                const rangeTree = new RangeTree<RubySymbol>();
+                for (const symbol of symbols) {
+                    const range = symbol.location.range;
+                    rangeTree.insertRange({
+                        start: { line: range.start.line, column: range.start.character },
+                        end: { line: range.end.line, column: range.end.character }
+                    }, symbol);
+                }
+                this.fileRangeTrees.set(uriStr, rangeTree);
 
                 // Update metadata
-                this.fileMetadata.set(uri.toString(), {
-                    uri: uri.toString(),
+                this.fileMetadata.set(uriStr, {
+                    uri: uriStr,
                     checksum,
                     lastIndexed: Date.now(),
                     symbolCount: symbols.length
@@ -669,22 +705,66 @@ export class AdvancedRubyIndexer {
 
     /**
      * Find symbols with fuzzy matching and scoring
+     * Performance: Uses SymbolIndex for O(1) exact match and O(k) prefix search
      */
     findSymbols(query: string, kind?: vscode.SymbolKind): RubySymbol[] {
-        const results: RubySymbol[] = [];
-
-        for (const symbols of this.symbols.values()) {
-            for (const symbol of symbols) {
-                if (kind && symbol.kind !== kind) {
-                    continue;
-                }
-
-                if (this.fuzzyMatch(symbol.name, query)) {
-                    results.push(symbol);
-                }
+        // Performance: Quick negative check using bloom filter
+        if (!this.symbolIndex.mightHaveName(query) && !this.symbolIndex.mightHaveName(query.toLowerCase())) {
+            // Try prefix search instead
+            const prefixResults = this.symbolIndex.findByPrefix(query, 100);
+            if (prefixResults.length === 0) {
+                return [];
             }
+            // Convert IndexedSymbol to RubySymbol and filter by kind
+            return this.convertAndFilter(prefixResults, kind, query);
         }
 
+        // Performance: Use optimized index for fast lookups
+        let indexedResults = this.symbolIndex.findByNameIgnoreCase(query);
+
+        // If exact match found, use it; otherwise try prefix
+        if (indexedResults.length === 0) {
+            indexedResults = this.symbolIndex.findByPrefix(query, 100);
+        }
+
+        return this.convertAndFilter(indexedResults, kind, query);
+    }
+
+    /**
+     * Convert IndexedSymbols to RubySymbols and filter by kind
+     */
+    private convertAndFilter(indexedResults: IndexedSymbol[], kind: vscode.SymbolKind | undefined, query: string): RubySymbol[] {
+        const results: RubySymbol[] = [];
+
+        for (const indexed of indexedResults) {
+            if (kind && indexed.kind !== kind) {
+                continue;
+            }
+
+            // Try to find the original RubySymbol with full details
+            const fileSymbols = this.symbols.get(indexed.location.uri.toString());
+            if (fileSymbols) {
+                const original = fileSymbols.find(s =>
+                    s.name === indexed.name &&
+                    s.location.range.start.line === indexed.location.range.start.line
+                );
+                if (original) {
+                    results.push(original);
+                    continue;
+                }
+            }
+
+            // Fallback: create RubySymbol from IndexedSymbol
+            results.push({
+                name: indexed.name,
+                kind: indexed.kind,
+                location: indexed.location,
+                containerName: indexed.containerName,
+                detail: indexed.detail
+            });
+        }
+
+        // Sort by match score
         return results.sort((a, b) => {
             const aScore = this.matchScore(a.name, query);
             const bScore = this.matchScore(b.name, query);
@@ -729,6 +809,46 @@ export class AdvancedRubyIndexer {
      */
     getFileSymbols(uri: vscode.Uri): RubySymbol[] {
         return this.symbols.get(uri.toString()) || [];
+    }
+
+    /**
+     * Find symbol at a specific position using RangeTree
+     * Performance: O(log n) lookup instead of O(n) iteration
+     */
+    findSymbolAtPosition(uri: vscode.Uri, position: vscode.Position): RubySymbol | undefined {
+        const rangeTree = this.fileRangeTrees.get(uri.toString());
+        if (!rangeTree) {
+            // Fallback to linear search
+            const symbols = this.getFileSymbols(uri);
+            return symbols.find(s => s.location.range.contains(position));
+        }
+
+        // Performance: Use RangeTree for O(log n) lookup
+        const result = rangeTree.searchSmallestAtPosition({
+            line: position.line,
+            column: position.character
+        });
+
+        return result;
+    }
+
+    /**
+     * Find all symbols containing a position (e.g., method inside a class)
+     * Performance: Uses RangeTree for efficient range queries
+     */
+    findSymbolsContainingPosition(uri: vscode.Uri, position: vscode.Position): RubySymbol[] {
+        const rangeTree = this.fileRangeTrees.get(uri.toString());
+        if (!rangeTree) {
+            // Fallback to linear search
+            const symbols = this.getFileSymbols(uri);
+            return symbols.filter(s => s.location.range.contains(position));
+        }
+
+        // Performance: Use RangeTree for efficient lookup
+        return rangeTree.searchAtPosition({
+            line: position.line,
+            column: position.character
+        });
     }
 
     /**
@@ -868,5 +988,8 @@ export class AdvancedRubyIndexer {
         this.typeInfo.clear();
         this.usages.clear();
         this.fileMetadata.clear();
+        // Performance: Clear optimized indexes
+        this.symbolIndex.clear();
+        this.fileRangeTrees.clear();
     }
 }

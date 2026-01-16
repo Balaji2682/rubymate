@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SchemaParser } from './schemaParser';
+import { Debouncer } from '../shared/utilities/debounce';
 
 export interface N1Issue {
     line: number;
@@ -12,8 +13,8 @@ export interface N1Issue {
 export class NPlusOneDetector {
     private schemaParser: SchemaParser;
     private diagnosticCollection: vscode.DiagnosticCollection;
-    // FIX: Add debounce timer to prevent excessive analysis
-    private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
+    // Performance: Use shared Debouncer for efficient debouncing per document
+    private debouncers: Map<string, Debouncer<void>> = new Map();
     private readonly DEBOUNCE_DELAY = 500; // ms
 
     constructor(schemaParser: SchemaParser) {
@@ -22,25 +23,31 @@ export class NPlusOneDetector {
     }
 
     /**
+     * Get or create debouncer for a document
+     */
+    private getDebouncer(document: vscode.TextDocument): Debouncer<void> {
+        const uri = document.uri.toString();
+        let debouncer = this.debouncers.get(uri);
+
+        if (!debouncer) {
+            debouncer = new Debouncer<void>(
+                async () => { await this.analyzeDocumentInternal(document); },
+                this.DEBOUNCE_DELAY,
+                { trailing: true }
+            );
+            this.debouncers.set(uri, debouncer);
+        }
+
+        return debouncer;
+    }
+
+    /**
      * Analyze document for N+1 queries (with debouncing)
      */
     async analyzeDocument(document: vscode.TextDocument): Promise<void> {
-        // FIX: Debounce analysis to prevent analyzing on every keystroke
-        const uri = document.uri.toString();
-
-        // Clear existing timer for this document
-        const existingTimer = this.debounceTimers.get(uri);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
-        }
-
-        // Set new timer
-        const timer = setTimeout(async () => {
-            this.debounceTimers.delete(uri);
-            await this.analyzeDocumentInternal(document);
-        }, this.DEBOUNCE_DELAY);
-
-        this.debounceTimers.set(uri, timer);
+        // Performance: Use shared Debouncer for efficient per-document debouncing
+        const debouncer = this.getDebouncer(document);
+        debouncer.trigger();
     }
 
     /**
@@ -490,11 +497,11 @@ export class NPlusOneDetector {
      * Dispose
      */
     dispose(): void {
-        // FIX: Clear all debounce timers on disposal
-        for (const timer of this.debounceTimers.values()) {
-            clearTimeout(timer);
+        // Cancel all pending debouncers
+        for (const debouncer of this.debouncers.values()) {
+            debouncer.cancel();
         }
-        this.debounceTimers.clear();
+        this.debouncers.clear();
 
         this.diagnosticCollection.dispose();
     }

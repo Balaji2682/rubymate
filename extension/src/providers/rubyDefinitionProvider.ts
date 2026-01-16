@@ -1,6 +1,17 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { Result, ok, err, tryAsync } from '../shared/utilities/result';
+import { LRUCache } from '../shared/dataStructures/lruCache';
+
+/**
+ * Error types for definition resolution
+ */
+type DefinitionError =
+    | { type: 'no_word_at_position' }
+    | { type: 'file_not_found'; path: string }
+    | { type: 'symbol_not_found'; name: string }
+    | { type: 'no_workspace' };
 
 /**
  * Comprehensive definition provider that handles:
@@ -8,11 +19,19 @@ import { AdvancedRubyIndexer } from '../advancedIndexer';
  * 2. Method navigation
  * 3. Require statement navigation
  * 4. Constant navigation
+ *
+ * Performance: Uses Result type for safer error handling
+ * and LRUCache for path resolution caching
  */
 export class RubyDefinitionProvider implements vscode.DefinitionProvider {
+    // Performance: Cache resolved require paths (200 entries, 30s TTL)
+    private pathCache: LRUCache<string, vscode.Uri | null>;
+
     constructor(
         private indexer: AdvancedRubyIndexer
-    ) {}
+    ) {
+        this.pathCache = new LRUCache<string, vscode.Uri | null>({ maxSize: 200, maxAge: 30000 });
+    }
 
     async provideDefinition(
         document: vscode.TextDocument,
@@ -245,15 +264,34 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
     }
 
     /**
-     * Resolve require path (same as before)
+     * Resolve require path using Result type for safer error handling
+     * Performance: Uses LRUCache to avoid repeated file system lookups
      */
     private async resolveRequirePath(
         requiredPath: string,
         currentFileUri: vscode.Uri
     ): Promise<vscode.Location | undefined> {
+        const result = await this.resolveRequirePathResult(requiredPath, currentFileUri);
+        return result.isOk() ? new vscode.Location(result.value, new vscode.Position(0, 0)) : undefined;
+    }
+
+    /**
+     * Internal method that returns Result type for explicit error handling
+     */
+    private async resolveRequirePathResult(
+        requiredPath: string,
+        currentFileUri: vscode.Uri
+    ): Promise<Result<vscode.Uri, DefinitionError>> {
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(currentFileUri);
         if (!workspaceFolder) {
-            return undefined;
+            return err({ type: 'no_workspace' });
+        }
+
+        // Performance: Check cache first
+        const cacheKey = `${workspaceFolder.uri.toString()}:${requiredPath}`;
+        const cached = this.pathCache.get(cacheKey);
+        if (cached !== undefined) {
+            return cached ? ok(cached) : err({ type: 'file_not_found', path: requiredPath });
         }
 
         const workspaceRoot = workspaceFolder.uri.fsPath;
@@ -302,13 +340,17 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
             pathsToTry.push(path.join(workspaceRoot, 'app', `${requiredPath}.rb`));
         }
 
-        // Try each path
+        // Try each path using Result type
         for (const tryPath of pathsToTry) {
-            try {
+            const fileCheckResult = await tryAsync(async () => {
                 await vscode.workspace.fs.stat(vscode.Uri.file(tryPath));
-                return new vscode.Location(vscode.Uri.file(tryPath), new vscode.Position(0, 0));
-            } catch {
-                // File doesn't exist, try next
+                return vscode.Uri.file(tryPath);
+            });
+
+            if (fileCheckResult.isOk()) {
+                // Performance: Cache successful resolution
+                this.pathCache.set(cacheKey, fileCheckResult.value);
+                return ok(fileCheckResult.value);
             }
         }
 
@@ -316,15 +358,22 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         const fileName = path.basename(requiredPath);
         const pattern = `**/${fileName}.rb`;
 
-        try {
+        const searchResult = await tryAsync(async () => {
             const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 1);
             if (files.length > 0) {
-                return new vscode.Location(files[0], new vscode.Position(0, 0));
+                return files[0];
             }
-        } catch {
-            // Search failed
+            throw new Error('No files found');
+        });
+
+        if (searchResult.isOk()) {
+            // Performance: Cache successful resolution
+            this.pathCache.set(cacheKey, searchResult.value);
+            return ok(searchResult.value);
         }
 
-        return undefined;
+        // Performance: Cache negative result to avoid repeated lookups
+        this.pathCache.set(cacheKey, null);
+        return err({ type: 'file_not_found', path: requiredPath });
     }
 }

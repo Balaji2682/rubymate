@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { LRUCache } from '../shared/dataStructures/lruCache';
+
+/**
+ * Performance: Shared cache for require path resolution
+ * This reduces filesystem lookups for frequently accessed paths (500 entries, 30s TTL)
+ */
+const requirePathCache = new LRUCache<string, vscode.Uri | null>({ maxSize: 500, maxAge: 30000 });
 
 export class RubyDefinitionProvider implements vscode.DefinitionProvider {
     async provideDefinition(
@@ -46,6 +53,13 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(currentFileUri);
         if (!workspaceFolder) {
             return undefined;
+        }
+
+        // Performance: Check cache first
+        const cacheKey = `${workspaceFolder.uri.toString()}:${requiredPath}`;
+        const cached = requirePathCache.get(cacheKey);
+        if (cached !== undefined) {
+            return cached || undefined;
         }
 
         const workspaceRoot = workspaceFolder.uri.fsPath;
@@ -115,7 +129,10 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         for (const tryPath of pathsToTry) {
             try {
                 await vscode.workspace.fs.stat(vscode.Uri.file(tryPath));
-                return vscode.Uri.file(tryPath);
+                const resolvedUri = vscode.Uri.file(tryPath);
+                // Performance: Cache successful resolution
+                requirePathCache.set(cacheKey, resolvedUri);
+                return resolvedUri;
             } catch {
                 // File doesn't exist, try next
             }
@@ -133,12 +150,16 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
             );
 
             if (files.length > 0) {
+                // Performance: Cache successful resolution
+                requirePathCache.set(cacheKey, files[0]);
                 return files[0];
             }
         } catch {
             // Search failed
         }
 
+        // Performance: Cache negative result to avoid repeated lookups
+        requirePathCache.set(cacheKey, null);
         return undefined;
     }
 

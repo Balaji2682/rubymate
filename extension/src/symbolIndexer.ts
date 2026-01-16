@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { BloomFilter } from './shared';
 
 export interface RubySymbol {
     name: string;
@@ -18,8 +19,33 @@ export class SymbolIndexer {
     private fileModTimes: Map<string, number> = new Map(); // Track file modification times for incremental indexing
     private cancellationTokenSource?: vscode.CancellationTokenSource;
 
+    /**
+     * BloomFilter for O(1) symbol name lookups.
+     * Quickly determines if a symbol name DEFINITELY doesn't exist,
+     * avoiding expensive iteration over all indexed symbols.
+     */
+    private symbolNameFilter: BloomFilter;
+
+    /**
+     * BloomFilter for O(1) class/module name lookups.
+     * Optimizes class/module searches by pre-filtering non-existent names.
+     */
+    private classModuleFilter: BloomFilter;
+
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
+
+        // Initialize BloomFilters with reasonable defaults
+        // Expected: ~5000 symbols with 1% false positive rate
+        this.symbolNameFilter = new BloomFilter({
+            expectedElements: 5000,
+            falsePositiveRate: 0.01
+        });
+
+        this.classModuleFilter = new BloomFilter({
+            expectedElements: 1000, // Fewer classes/modules than total symbols
+            falsePositiveRate: 0.01
+        });
     }
 
     async indexWorkspace(incremental: boolean = false): Promise<void> {
@@ -33,6 +59,9 @@ export class SymbolIndexer {
 
         if (!incremental) {
             this.symbols.clear();
+            // Reset BloomFilters for full reindex
+            this.symbolNameFilter.clear();
+            this.classModuleFilter.clear();
         }
 
         // Show progress notification for potentially long operation
@@ -150,6 +179,17 @@ export class SymbolIndexer {
 
             if (symbols.length > 0) {
                 this.symbols.set(uri.toString(), symbols);
+
+                // Populate BloomFilters for O(1) existence checks
+                for (const symbol of symbols) {
+                    // Add all symbol names (lowercase for case-insensitive lookup)
+                    this.symbolNameFilter.add(symbol.name.toLowerCase());
+
+                    // Add classes and modules to specialized filter
+                    if (symbol.kind === vscode.SymbolKind.Class || symbol.kind === vscode.SymbolKind.Module) {
+                        this.classModuleFilter.add(symbol.name.toLowerCase());
+                    }
+                }
             }
 
             // Update modification time
@@ -331,9 +371,34 @@ export class SymbolIndexer {
         return symbols;
     }
 
+    /**
+     * Quick check if a symbol with the exact name might exist.
+     * Uses BloomFilter for O(1) lookup - returns false if DEFINITELY not found.
+     */
+    mightHaveSymbol(name: string): boolean {
+        return this.symbolNameFilter.mightContain(name.toLowerCase());
+    }
+
+    /**
+     * Quick check if a class/module with the exact name might exist.
+     * Uses BloomFilter for O(1) lookup - returns false if DEFINITELY not found.
+     */
+    mightHaveClass(name: string): boolean {
+        return this.classModuleFilter.mightContain(name.toLowerCase());
+    }
+
     findClasses(query: string): RubySymbol[] {
         const results: RubySymbol[] = [];
         const lowerQuery = query.toLowerCase();
+
+        // Early exit: Use BloomFilter for exact match queries
+        // If looking for an exact class name and BloomFilter says "definitely not",
+        // we can skip the expensive iteration entirely
+        if (query.length > 2 && !this.classModuleFilter.mightContain(lowerQuery)) {
+            // For short queries, we still need to check (could be prefix of a longer name)
+            // But for longer queries that are exact matches, BloomFilter can help
+            // Note: We still do the search because fuzzy matching might find related results
+        }
 
         for (const symbols of this.symbols.values()) {
             for (const symbol of symbols) {
@@ -461,6 +526,27 @@ export class SymbolIndexer {
         this.failedFiles.clear();
     }
 
+    /**
+     * Get BloomFilter statistics for debugging/monitoring
+     */
+    getBloomFilterStats(): {
+        symbolFilter: { count: number; fillRatio: number; memoryBytes: number };
+        classModuleFilter: { count: number; fillRatio: number; memoryBytes: number };
+    } {
+        return {
+            symbolFilter: {
+                count: this.symbolNameFilter.count,
+                fillRatio: this.symbolNameFilter.fillRatio,
+                memoryBytes: this.symbolNameFilter.memoryUsage
+            },
+            classModuleFilter: {
+                count: this.classModuleFilter.count,
+                fillRatio: this.classModuleFilter.fillRatio,
+                memoryBytes: this.classModuleFilter.memoryUsage
+            }
+        };
+    }
+
     dispose(): void {
         // Cancel any ongoing indexing
         this.cancelIndexing();
@@ -469,6 +555,10 @@ export class SymbolIndexer {
         this.symbols.clear();
         this.failedFiles.clear();
         this.fileModTimes.clear();
+
+        // Clear BloomFilters
+        this.symbolNameFilter.clear();
+        this.classModuleFilter.clear();
 
         // Dispose cancellation token
         if (this.cancellationTokenSource) {

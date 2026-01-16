@@ -10,10 +10,28 @@ import { ReferenceTracker, DeadCodeAnalysis } from './referenceTracker';
 import { RailsIntelligence, RailsComponent } from './railsIntelligence';
 import { SchemaParser } from '../database/schemaParser';
 import { RubySymbol } from '../advancedIndexer';
+import { AsyncQueue, RateLimitedQueue } from '../shared/utilities/asyncQueue';
+import { EventEmitter } from '../shared/utilities/eventEmitter';
 
 /**
  * Intelligent Indexer - Orchestrates all semantic analysis components
+ *
+ * Performance enhancements:
+ * - Uses AsyncQueue for controlled concurrency during indexing
+ * - Uses EventEmitter for progress notifications
  */
+
+/**
+ * Events emitted by the indexer
+ */
+export type IndexerEvents = {
+    'indexing:start': { files: number };
+    'indexing:progress': { current: number; total: number; file: string };
+    'indexing:complete': { duration: number; fileCount: number };
+    'indexing:error': { error: Error; file?: string };
+    'file:indexed': { uri: string; symbolCount: number };
+    [key: string]: unknown;
+};
 
 export class IntelligentIndexer {
     private context: vscode.ExtensionContext;
@@ -26,6 +44,11 @@ export class IntelligentIndexer {
     private referenceTracker: ReferenceTracker;
     private railsIntelligence: RailsIntelligence;
     private schemaParser: SchemaParser;
+
+    // Performance: Controlled concurrency with AsyncQueue
+    private indexingQueue: AsyncQueue<void>;
+    // Performance: Event-driven progress notifications
+    public readonly events: EventEmitter<IndexerEvents>;
 
     // Indexing state
     private isIndexing: boolean = false;
@@ -51,6 +74,11 @@ export class IntelligentIndexer {
         this.typeInference = new TypeInferenceEngine(this.graphBuilder, schemaParser, outputChannel);
         this.smartSearch = new SmartSearchEngine(this.graphBuilder);
         this.referenceTracker = new ReferenceTracker(this.graphBuilder, outputChannel);
+
+        // Performance: Initialize AsyncQueue with controlled concurrency (4 parallel files)
+        this.indexingQueue = new AsyncQueue<void>({ concurrency: 4, timeout: 30000 });
+        // Performance: Initialize EventEmitter for progress notifications
+        this.events = new EventEmitter<IndexerEvents>();
 
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         this.workspaceRoot = workspaceFolder?.uri.fsPath || '';
@@ -135,6 +163,7 @@ export class IntelligentIndexer {
 
     /**
      * Internal indexing implementation with progress reporting
+     * Performance: Uses AsyncQueue for controlled concurrent file processing
      */
     private async indexWorkspaceInternal(
         progress: vscode.Progress<{ message?: string; increment?: number }>,
@@ -152,30 +181,45 @@ export class IntelligentIndexer {
             return;
         }
 
-        // Index in batches to avoid blocking
-        const batchSize = 20;
-        const totalBatches = Math.ceil(files.length / batchSize);
-        const incrementPerBatch = 100 / totalBatches;
+        // Emit start event
+        this.events.emit('indexing:start', { files: files.length });
 
-        for (let i = 0; i < files.length; i += batchSize) {
+        // Performance: Use AsyncQueue for controlled concurrency
+        let indexed = 0;
+        const incrementPerFile = 100 / files.length;
+
+        // Create indexing tasks
+        const indexTasks = files.map((uri, index) => async () => {
             if (token.isCancellationRequested) {
-                this.outputChannel.appendLine('Indexing cancelled by user');
                 return;
             }
 
-            const batch = files.slice(i, i + batchSize);
-            const batchNumber = Math.floor(i / batchSize) + 1;
+            try {
+                await this.indexFile(uri);
+                indexed++;
 
-            progress.report({
-                message: `Indexing batch ${batchNumber}/${totalBatches} (${i + batch.length}/${files.length} files)`,
-                increment: incrementPerBatch
-            });
+                // Emit progress events
+                this.events.emit('indexing:progress', {
+                    current: indexed,
+                    total: files.length,
+                    file: uri.fsPath
+                });
 
-            await Promise.all(batch.map(uri => this.indexFile(uri)));
+                // Update VS Code progress
+                progress.report({
+                    message: `Indexing ${indexed}/${files.length}: ${path.basename(uri.fsPath)}`,
+                    increment: incrementPerFile
+                });
+            } catch (error) {
+                this.events.emit('indexing:error', {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                    file: uri.fsPath
+                });
+            }
+        });
 
-            // Yield to allow UI updates
-            await this.sleep(10);
-        }
+        // Process files with controlled concurrency using AsyncQueue
+        await this.indexingQueue.enqueueAll(indexTasks);
 
         // Save cache
         progress.report({ message: 'Saving cache...' });
@@ -183,6 +227,9 @@ export class IntelligentIndexer {
 
         const duration = Date.now() - startTime;
         this.outputChannel.appendLine(`Indexed workspace in ${duration}ms`);
+
+        // Emit complete event
+        this.events.emit('indexing:complete', { duration, fileCount: indexed });
 
         // Print statistics only if there's meaningful data
         const stats = this.getStats();
@@ -223,6 +270,9 @@ export class IntelligentIndexer {
             // Index symbols for search
             const symbols = await this.extractSymbols(uri, ast);
             this.smartSearch.indexSymbols(uri.toString(), symbols);
+
+            // Emit file indexed event
+            this.events.emit('file:indexed', { uri: uri.toString(), symbolCount: symbols.length });
 
         } catch (error) {
             this.outputChannel.appendLine(`Error indexing ${uri.fsPath}: ${error}`);
@@ -560,12 +610,6 @@ export class IntelligentIndexer {
      */
     dispose(): void {
         this.saveCache();
-    }
-
-    /**
-     * Sleep helper
-     */
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        this.indexingQueue.clear();
     }
 }

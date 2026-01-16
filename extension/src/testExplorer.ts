@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { promisify } from 'util';
+import { Debouncer } from './shared';
 
 const readFile = promisify(fs.readFile);
 
@@ -19,6 +20,10 @@ export class RubyTestExplorer {
     private outputChannel: vscode.OutputChannel;
     private watchers: vscode.FileSystemWatcher[] = [];
     private testFramework: 'rspec' | 'minitest' | 'auto';
+
+    // Debouncers for file watcher events to avoid rapid re-parsing
+    private fileUpdateDebouncers = new Map<string, Debouncer<void>>();
+    private readonly FILE_UPDATE_DEBOUNCE_MS = 300;
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
@@ -72,22 +77,55 @@ export class RubyTestExplorer {
             return;
         }
 
+        // Helper to get or create a debouncer for a file
+        const getDebouncedUpdater = (uri: vscode.Uri) => {
+            const key = uri.toString();
+            let debouncer = this.fileUpdateDebouncers.get(key);
+            if (!debouncer) {
+                debouncer = new Debouncer(
+                    () => { this.updateTestsForFile(uri); },
+                    this.FILE_UPDATE_DEBOUNCE_MS,
+                    { trailing: true }
+                );
+                this.fileUpdateDebouncers.set(key, debouncer);
+            }
+            return debouncer;
+        };
+
         // Watch RSpec files
         const rspecWatcher = vscode.workspace.createFileSystemWatcher(
             new vscode.RelativePattern(workspaceFolder, '**/*_spec.rb')
         );
-        rspecWatcher.onDidChange(uri => this.updateTestsForFile(uri));
-        rspecWatcher.onDidCreate(uri => this.updateTestsForFile(uri));
-        rspecWatcher.onDidDelete(uri => this.removeTestsForFile(uri));
+        rspecWatcher.onDidChange(uri => getDebouncedUpdater(uri).trigger());
+        rspecWatcher.onDidCreate(uri => getDebouncedUpdater(uri).trigger());
+        rspecWatcher.onDidDelete(uri => {
+            // Cancel pending debouncer and clean up
+            const key = uri.toString();
+            const debouncer = this.fileUpdateDebouncers.get(key);
+            if (debouncer) {
+                debouncer.cancel();
+                this.fileUpdateDebouncers.delete(key);
+            }
+            this.removeTestsForFile(uri);
+        });
         this.watchers.push(rspecWatcher);
 
         // Watch Minitest files
         const minitestWatcher = vscode.workspace.createFileSystemWatcher(
             new vscode.RelativePattern(workspaceFolder, '**/*_test.rb')
         );
-        minitestWatcher.onDidChange(uri => this.updateTestsForFile(uri));
-        minitestWatcher.onDidCreate(uri => this.updateTestsForFile(uri));
-        minitestWatcher.onDidDelete(uri => this.removeTestsForFile(uri));
+        minitestWatcher.onDidChange(uri => getDebouncedUpdater(uri).trigger());
+        minitestWatcher.onDidCreate(uri => getDebouncedUpdater(uri).trigger());
+        minitestWatcher.onDidDelete(uri => {
+            // Cancel pending debouncer and clean up
+            const key = uri.toString();
+            const debouncer = this.fileUpdateDebouncers.get(key);
+            if (debouncer) {
+                debouncer.cancel();
+                this.fileUpdateDebouncers.delete(key);
+            }
+            this.removeTestsForFile(uri);
+        });
         this.watchers.push(minitestWatcher);
     }
 
@@ -411,6 +449,12 @@ export class RubyTestExplorer {
     }
 
     public dispose() {
+        // Cancel all pending file update debouncers
+        for (const debouncer of this.fileUpdateDebouncers.values()) {
+            debouncer.cancel();
+        }
+        this.fileUpdateDebouncers.clear();
+
         this.testController.dispose();
         this.watchers.forEach(watcher => watcher.dispose());
     }

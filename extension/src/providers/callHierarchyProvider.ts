@@ -1,12 +1,26 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CallGraphIndex, MethodCall } from '../shared/indexes/callGraphIndex';
+import { LRUCache } from '../shared/dataStructures/lruCache';
 
 /**
  * Provides call hierarchy like IDE Ctrl+Alt+H
  * Shows incoming calls (who calls this method) and outgoing calls (what this method calls)
+ *
+ * Performance: Uses CallGraphIndex for O(1) caller/callee lookups
+ * and LRUCache to cache file parsing results
  */
 export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
-    constructor(private indexer: AdvancedRubyIndexer) {}
+    // Performance: Use CallGraphIndex for fast call tracking
+    private callGraph: CallGraphIndex = new CallGraphIndex();
+
+    // Performance: Cache parsed file calls to avoid re-parsing
+    private fileCallCache: LRUCache<string, MethodCall[]>;
+
+    constructor(private indexer: AdvancedRubyIndexer) {
+        // Performance: 100 files cached, 60 second TTL
+        this.fileCallCache = new LRUCache<string, MethodCall[]>({ maxSize: 100, maxAge: 60000 });
+    }
 
     async prepareCallHierarchy(
         document: vscode.TextDocument,
@@ -49,6 +63,120 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
         });
     }
 
+    /**
+     * Build call graph index for a file
+     * Performance: Parses file once and stores all method calls for fast lookups
+     */
+    private async buildFileCallGraph(fileUri: vscode.Uri, document: vscode.TextDocument): Promise<MethodCall[]> {
+        const uriStr = fileUri.toString();
+
+        // Performance: Check cache first
+        const cached = this.fileCallCache.get(uriStr);
+        if (cached) {
+            return cached;
+        }
+
+        const calls: MethodCall[] = [];
+        const text = document.getText();
+        const lines = text.split('\n');
+
+        let currentMethod: { name: string; containerName?: string; startLine: number } | undefined;
+        let currentClass: string | undefined;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Skip comments
+            if (trimmed.startsWith('#')) continue;
+
+            // Track class context
+            const classMatch = trimmed.match(/^class\s+([A-Z][A-Za-z0-9_:]*)/);
+            if (classMatch) {
+                currentClass = classMatch[1];
+                continue;
+            }
+
+            // Track method definitions
+            const methodMatch = trimmed.match(/^def\s+(self\.)?([a-z_][a-z0-9_?!=]*)/);
+            if (methodMatch) {
+                currentMethod = {
+                    name: methodMatch[2],
+                    containerName: currentClass,
+                    startLine: i
+                };
+
+                // Add method to call graph index
+                this.callGraph.addMethod(methodMatch[2], currentClass, {
+                    uri: uriStr,
+                    startLine: i,
+                    startColumn: line.indexOf('def'),
+                    endLine: i,
+                    endColumn: line.length
+                }, {
+                    isClassMethod: !!methodMatch[1]
+                });
+                continue;
+            }
+
+            // Find method calls within current method
+            if (currentMethod) {
+                // Match: .method_name, method_name(), self.method_name
+                const callPatterns = [
+                    /\.([a-z_][a-z0-9_?!]*)\s*(?:\(|$|[^a-z0-9_])/g,
+                    /\b([a-z_][a-z0-9_?!]*)\s*\(/g,
+                ];
+
+                for (const pattern of callPatterns) {
+                    let match;
+                    while ((match = pattern.exec(trimmed)) !== null) {
+                        const methodName = match[1];
+                        // Skip Ruby keywords
+                        if (['if', 'unless', 'while', 'until', 'for', 'case', 'when', 'begin', 'rescue', 'end', 'return', 'yield', 'raise', 'puts', 'print', 'require', 'include'].includes(methodName)) {
+                            continue;
+                        }
+
+                        const call: MethodCall = {
+                            caller: {
+                                name: currentMethod.name,
+                                containerName: currentMethod.containerName,
+                                location: {
+                                    uri: uriStr,
+                                    startLine: currentMethod.startLine,
+                                    startColumn: 0,
+                                    endLine: currentMethod.startLine,
+                                    endColumn: 0
+                                }
+                            },
+                            callee: {
+                                name: methodName
+                            },
+                            callLocation: {
+                                uri: uriStr,
+                                startLine: i,
+                                startColumn: line.indexOf(methodName),
+                                endLine: i,
+                                endColumn: line.indexOf(methodName) + methodName.length
+                            }
+                        };
+
+                        calls.push(call);
+                        this.callGraph.addCall(call);
+                    }
+                }
+            }
+
+            // End of method
+            if (trimmed === 'end' && currentMethod) {
+                currentMethod = undefined;
+            }
+        }
+
+        // Performance: Cache the parsed calls
+        this.fileCallCache.set(uriStr, calls);
+        return calls;
+    }
+
     async provideCallHierarchyIncomingCalls(
         item: vscode.CallHierarchyItem,
         token: vscode.CancellationToken
@@ -59,49 +187,88 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
 
         const incomingCalls: vscode.CallHierarchyIncomingCall[] = [];
 
-        // Search all Ruby files for calls to this method
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) {
-            return undefined;
+        // Performance: First check CallGraphIndex for cached callers
+        const containerName = item.detail?.replace('in ', '') || undefined;
+        const indexedCallers = this.callGraph.getCallers(item.name, containerName);
+
+        if (indexedCallers.length > 0) {
+            // Use cached results from CallGraphIndex
+            for (const call of indexedCallers) {
+                const fromItem = new vscode.CallHierarchyItem(
+                    vscode.SymbolKind.Method,
+                    call.caller.name,
+                    call.caller.containerName || '',
+                    vscode.Uri.parse(call.caller.location.uri),
+                    new vscode.Range(
+                        call.caller.location.startLine, call.caller.location.startColumn,
+                        call.caller.location.endLine, call.caller.location.endColumn
+                    ),
+                    new vscode.Range(
+                        call.caller.location.startLine, call.caller.location.startColumn,
+                        call.caller.location.endLine, call.caller.location.endColumn
+                    )
+                );
+
+                incomingCalls.push(
+                    new vscode.CallHierarchyIncomingCall(fromItem, [
+                        new vscode.Range(
+                            call.callLocation.startLine, call.callLocation.startColumn,
+                            call.callLocation.endLine, call.callLocation.endColumn
+                        )
+                    ])
+                );
+            }
         }
 
-        for (const folder of workspaceFolders) {
-            const files = await vscode.workspace.findFiles(
-                new vscode.RelativePattern(folder, '**/*.rb'),
-                '**/node_modules/**'
-            );
+        // If no cached results, scan workspace and build index
+        if (incomingCalls.length === 0) {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders) {
+                return undefined;
+            }
 
-            for (const fileUri of files) {
-                if (token.isCancellationRequested) {
-                    break;
-                }
+            for (const folder of workspaceFolders) {
+                const files = await vscode.workspace.findFiles(
+                    new vscode.RelativePattern(folder, '**/*.rb'),
+                    '**/node_modules/**'
+                );
 
-                try {
-                    const document = await vscode.workspace.openTextDocument(fileUri);
-                    const calls = await this.findMethodCalls(document, item.name);
-
-                    for (const call of calls) {
-                        // Find the method that contains this call
-                        const containingMethod = this.findContainingMethod(document, call.range.start);
-
-                        if (containingMethod) {
-                            const fromItem = new vscode.CallHierarchyItem(
-                                vscode.SymbolKind.Method,
-                                containingMethod.name,
-                                containingMethod.containerName || '',
-                                document.uri,
-                                containingMethod.range,
-                                containingMethod.range
-                            );
-
-                            incomingCalls.push(
-                                new vscode.CallHierarchyIncomingCall(fromItem, [call.range])
-                            );
-                        }
+                for (const fileUri of files) {
+                    if (token.isCancellationRequested) {
+                        break;
                     }
-                } catch (error) {
-                    // Skip files that can't be read
-                    continue;
+
+                    try {
+                        const document = await vscode.workspace.openTextDocument(fileUri);
+
+                        // Performance: Build call graph index for this file
+                        await this.buildFileCallGraph(fileUri, document);
+
+                        const calls = await this.findMethodCalls(document, item.name);
+
+                        for (const call of calls) {
+                            // Find the method that contains this call
+                            const containingMethod = this.findContainingMethod(document, call.range.start);
+
+                            if (containingMethod) {
+                                const fromItem = new vscode.CallHierarchyItem(
+                                    vscode.SymbolKind.Method,
+                                    containingMethod.name,
+                                    containingMethod.containerName || '',
+                                    document.uri,
+                                    containingMethod.range,
+                                    containingMethod.range
+                                );
+
+                                incomingCalls.push(
+                                    new vscode.CallHierarchyIncomingCall(fromItem, [call.range])
+                                );
+                            }
+                        }
+                    } catch (error) {
+                        // Skip files that can't be read
+                        continue;
+                    }
                 }
             }
         }

@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
+import { Graph } from '../shared/dataStructures/graph';
+import { InheritanceIndex, SourceLocation } from '../shared/indexes/inheritanceIndex';
 
 /**
  * Semantic Graph - Understanding relationships between code elements
+ *
+ * Performance enhancements:
+ * - Uses shared Graph data structure for efficient traversal
+ * - Uses InheritanceIndex for Ruby-specific class hierarchy tracking
  */
 
 export interface SemanticGraph {
@@ -155,14 +161,23 @@ export enum TypeSource {
 
 /**
  * Semantic Graph Builder - Constructs and maintains the semantic graph
+ *
+ * Performance: Uses shared data structures for efficient lookups and traversals
  */
 export class SemanticGraphBuilder {
     private graph: SemanticGraph;
     private outputChannel: vscode.OutputChannel;
 
+    // Performance: Use optimized shared data structures
+    private methodCallGraph: Graph<MethodInfo, MethodCallEdge>;
+    private inheritanceIndex: InheritanceIndex;
+
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
         this.graph = this.createEmptyGraph();
+        // Initialize optimized data structures
+        this.methodCallGraph = new Graph<MethodInfo, MethodCallEdge>({ directed: true });
+        this.inheritanceIndex = new InheritanceIndex();
     }
 
     private createEmptyGraph(): SemanticGraph {
@@ -179,6 +194,20 @@ export class SemanticGraphBuilder {
     }
 
     /**
+     * Get the optimized inheritance index for fast hierarchy lookups
+     */
+    getInheritanceIndex(): InheritanceIndex {
+        return this.inheritanceIndex;
+    }
+
+    /**
+     * Get the optimized method call graph for traversal
+     */
+    getMethodCallGraph(): Graph<MethodInfo, MethodCallEdge> {
+        return this.methodCallGraph;
+    }
+
+    /**
      * Get the semantic graph
      */
     getGraph(): SemanticGraph {
@@ -191,12 +220,23 @@ export class SemanticGraphBuilder {
     addClass(classInfo: ClassInfo): void {
         this.graph.classes.set(classInfo.fullyQualifiedName, classInfo);
 
+        // Performance: Also populate InheritanceIndex for fast hierarchy lookups
+        const location: SourceLocation = {
+            uri: classInfo.location.uri.toString(),
+            startLine: classInfo.location.range.start.line,
+            startColumn: classInfo.location.range.start.character,
+            endLine: classInfo.location.range.end.line,
+            endColumn: classInfo.location.range.end.character
+        };
+
         // Update superclass's subclasses
         if (classInfo.superclass) {
             const superclass = this.graph.classes.get(classInfo.superclass);
             if (superclass && !superclass.subclasses.includes(classInfo.fullyQualifiedName)) {
                 superclass.subclasses.push(classInfo.fullyQualifiedName);
             }
+            // Add to optimized inheritance index
+            this.inheritanceIndex.addInheritance(classInfo.fullyQualifiedName, classInfo.superclass, location);
         }
 
         // Update included modules
@@ -205,6 +245,8 @@ export class SemanticGraphBuilder {
             if (module && !module.includedIn.includes(classInfo.fullyQualifiedName)) {
                 module.includedIn.push(classInfo.fullyQualifiedName);
             }
+            // Add to optimized inheritance index
+            this.inheritanceIndex.addInclude(classInfo.fullyQualifiedName, mixin, location);
         }
     }
 
@@ -220,6 +262,11 @@ export class SemanticGraphBuilder {
      */
     addMethod(methodInfo: MethodInfo): void {
         this.graph.methods.set(methodInfo.id, methodInfo);
+
+        // Performance: Add to optimized call graph structure
+        if (!this.methodCallGraph.hasNode(methodInfo.id)) {
+            this.methodCallGraph.addNode(methodInfo.id, methodInfo);
+        }
 
         // Add to class's method list
         if (methodInfo.className) {
@@ -238,6 +285,20 @@ export class SemanticGraphBuilder {
         const existing = this.graph.callGraph.get(edge.caller) || [];
         existing.push(edge);
         this.graph.callGraph.set(edge.caller, existing);
+
+        // Performance: Add to optimized Graph structure for fast traversal
+        // Ensure nodes exist
+        if (!this.methodCallGraph.hasNode(edge.caller)) {
+            this.methodCallGraph.addNode(edge.caller, this.graph.methods.get(edge.caller)!);
+        }
+        if (!this.methodCallGraph.hasNode(edge.callee)) {
+            const calleeMethod = this.graph.methods.get(edge.callee);
+            if (calleeMethod) {
+                this.methodCallGraph.addNode(edge.callee, calleeMethod);
+            }
+        }
+        // Add edge to optimized graph
+        this.methodCallGraph.addEdge(edge.caller, edge.callee, edge);
 
         // Update caller's calls list
         const caller = this.graph.methods.get(edge.caller);
@@ -319,63 +380,45 @@ export class SemanticGraphBuilder {
 
     /**
      * Get all subclasses of a class (recursive)
+     * Performance: Uses InheritanceIndex for O(1) lookup of direct subclasses
      */
     getAllSubclasses(className: string): string[] {
-        const result: string[] = [];
-        const classInfo = this.graph.classes.get(className);
-
-        if (!classInfo) return result;
-
-        for (const subclass of classInfo.subclasses) {
-            result.push(subclass);
-            result.push(...this.getAllSubclasses(subclass));
-        }
-
-        return result;
+        // Performance: Use optimized InheritanceIndex
+        return this.inheritanceIndex.getDescendants(className);
     }
 
     /**
      * Get full inheritance chain for a class
+     * Performance: Uses InheritanceIndex for efficient ancestor traversal
      */
     getInheritanceChain(className: string): string[] {
-        const chain: string[] = [className];
-        let currentClass = this.graph.classes.get(className);
-
-        while (currentClass?.superclass) {
-            chain.push(currentClass.superclass);
-            currentClass = this.graph.classes.get(currentClass.superclass);
-        }
-
-        return chain;
+        // Performance: Use optimized InheritanceIndex
+        const ancestors = this.inheritanceIndex.getAncestors(className);
+        return [className, ...ancestors];
     }
 
     /**
      * Get all methods available to a class (including inherited and mixed-in)
+     * Performance: Uses InheritanceIndex MRO for correct method resolution order
      */
     getAllAvailableMethods(className: string): MethodInfo[] {
         const methods: MethodInfo[] = [];
-        const classInfo = this.graph.classes.get(className);
+        const seen = new Set<string>();
 
-        if (!classInfo) return methods;
+        // Performance: Use InheritanceIndex for proper Ruby MRO
+        const mro = this.inheritanceIndex.getMethodResolutionOrder(className);
 
-        // Get own methods
-        for (const methodId of classInfo.methods) {
-            const method = this.graph.methods.get(methodId);
-            if (method) methods.push(method);
-        }
+        for (const classOrModule of mro) {
+            const classInfo = this.graph.classes.get(classOrModule);
+            const moduleInfo = this.graph.modules.get(classOrModule);
 
-        // Get inherited methods
-        if (classInfo.superclass) {
-            methods.push(...this.getAllAvailableMethods(classInfo.superclass));
-        }
+            const methodIds = classInfo?.methods || moduleInfo?.methods || [];
 
-        // Get methods from included modules
-        for (const mixin of classInfo.mixins) {
-            const module = this.graph.modules.get(mixin);
-            if (module) {
-                for (const methodId of module.methods) {
-                    const method = this.graph.methods.get(methodId);
-                    if (method) methods.push(method);
+            for (const methodId of methodIds) {
+                const method = this.graph.methods.get(methodId);
+                if (method && !seen.has(method.name)) {
+                    methods.push(method);
+                    seen.add(method.name);
                 }
             }
         }
@@ -385,24 +428,21 @@ export class SemanticGraphBuilder {
 
     /**
      * Get call hierarchy for a method (who calls this method)
+     * Performance: Uses optimized Graph structure for fast traversal
      */
     getCallHierarchy(methodId: string, visited: Set<string> = new Set()): MethodCallEdge[] {
         if (visited.has(methodId)) return [];
         visited.add(methodId);
 
-        const method = this.graph.methods.get(methodId);
-        if (!method) return [];
-
+        // Performance: Use optimized Graph for incoming edges lookup
+        const incomingEdges = this.methodCallGraph.getIncomingEdges(methodId);
         const calls: MethodCallEdge[] = [];
 
-        // Find all edges where this method is the callee
-        for (const [caller, edges] of this.graph.callGraph) {
-            for (const edge of edges) {
-                if (edge.callee === methodId) {
-                    calls.push(edge);
-                    // Recursively get callers of caller
-                    calls.push(...this.getCallHierarchy(caller, visited));
-                }
+        for (const edge of incomingEdges) {
+            if (edge.data) {
+                calls.push(edge.data);
+                // Recursively get callers of caller
+                calls.push(...this.getCallHierarchy(edge.from, visited));
             }
         }
 
@@ -502,6 +542,9 @@ export class SemanticGraphBuilder {
      */
     clear(): void {
         this.graph = this.createEmptyGraph();
+        // Clear optimized data structures
+        this.methodCallGraph.clear();
+        this.inheritanceIndex.clear();
     }
 
     /**

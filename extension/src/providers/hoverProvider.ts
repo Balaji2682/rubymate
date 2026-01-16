@@ -1,48 +1,92 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer, RubySymbol } from '../advancedIndexer';
+import { LRUCache } from '../shared/dataStructures/lruCache';
+import { getGlobalMetrics } from '../utils/performanceMonitor';
 
 /**
  * Provides hover information like IDE Ctrl+Q (Quick Documentation)
  * Shows method signatures, parameter info, and documentation
+ *
+ * Performance: Uses LRUCache to cache hover results for repeated lookups
+ * and tracks metrics via the performance monitor
  */
 export class RubyHoverProvider implements vscode.HoverProvider {
+    // Performance: Cache hover results (200 entries, 5 second TTL)
+    private hoverCache: LRUCache<string, vscode.Hover>;
+
     constructor(
         private indexer: AdvancedRubyIndexer
-    ) {}
+    ) {
+        // Performance: 200 entries max, 5 second TTL
+        this.hoverCache = new LRUCache<string, vscode.Hover>({ maxSize: 200, maxAge: 5000 });
+    }
+
+    /**
+     * Generate cache key for hover lookup
+     */
+    private getCacheKey(document: vscode.TextDocument, position: vscode.Position, word: string): string {
+        return `${document.uri.toString()}:${position.line}:${word}`;
+    }
 
     async provideHover(
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken
     ): Promise<vscode.Hover | undefined> {
-        if (token.isCancellationRequested) {
-            return undefined;
-        }
+        // Performance: Track metrics
+        const startTime = Date.now();
+        let success = true;
 
-        const wordRange = document.getWordRangeAtPosition(position);
-        if (!wordRange) {
-            return undefined;
-        }
-
-        const word = document.getText(wordRange);
-        const line = document.lineAt(position.line).text;
-
-        // Build base hover from RubyMate index
-        let baseHover: vscode.Hover | null = null;
-        const symbols = this.indexer.findSymbols(word);
-
-        if (symbols.length > 0) {
-            // Prioritize by context
-            const symbol = this.findBestMatch(symbols, word, line, document, position);
-            if (symbol) {
-                // Build hover content from RubyMate
-                const hoverContent = this.buildHoverContent(symbol);
-                baseHover = new vscode.Hover(hoverContent, wordRange);
+        try {
+            if (token.isCancellationRequested) {
+                return undefined;
             }
-        }
 
-        // Return hover (or undefined if no symbols found)
-        return baseHover || undefined;
+            const wordRange = document.getWordRangeAtPosition(position);
+            if (!wordRange) {
+                return undefined;
+            }
+
+            const word = document.getText(wordRange);
+
+            // Performance: Check cache first
+            const cacheKey = this.getCacheKey(document, position, word);
+            const cached = this.hoverCache.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            const line = document.lineAt(position.line).text;
+
+            // Build base hover from RubyMate index
+            let baseHover: vscode.Hover | null = null;
+            const symbols = this.indexer.findSymbols(word);
+
+            if (symbols.length > 0) {
+                // Prioritize by context
+                const symbol = this.findBestMatch(symbols, word, line, document, position);
+                if (symbol) {
+                    // Build hover content from RubyMate
+                    const hoverContent = this.buildHoverContent(symbol);
+                    baseHover = new vscode.Hover(hoverContent, wordRange);
+                }
+            }
+
+            // Performance: Cache the result
+            if (baseHover) {
+                this.hoverCache.set(cacheKey, baseHover);
+            }
+
+            // Return hover (or undefined if no symbols found)
+            return baseHover || undefined;
+        } catch (error) {
+            success = false;
+            throw error;
+        } finally {
+            // Performance: Record metrics
+            const duration = Date.now() - startTime;
+            getGlobalMetrics().recordCall('hover:provideHover', duration, success);
+        }
     }
 
     private findBestMatch(

@@ -27,6 +27,7 @@ import { ConfigValidator } from './configValidator';
 import { StatusBarManager, ExtensionState } from './statusBarManager';
 import { TelemetryManager } from './telemetryManager';
 import { RatingReminderManager } from './ratingReminder';
+import { Debouncer } from './shared';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -211,14 +212,51 @@ export async function activate(context: vscode.ExtensionContext) {
             );
         });
 
-    // Watch for file changes to re-index
+    // Watch for file changes to re-index (with debouncing to avoid rapid re-indexing)
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.rb');
-    watcher.onDidChange(uri => symbolIndexer.indexFile(uri));
-    watcher.onDidCreate(uri => symbolIndexer.indexFile(uri));
+
+    // Use Debouncer to coalesce rapid file changes (e.g., during save or bulk operations)
+    // Map of URI -> Debouncer to handle per-file debouncing
+    const fileIndexDebouncers = new Map<string, Debouncer<void>>();
+    const FILE_INDEX_DEBOUNCE_MS = 300;
+
+    const getDebouncedIndexer = (uri: vscode.Uri) => {
+        const key = uri.toString();
+        let debouncer = fileIndexDebouncers.get(key);
+        if (!debouncer) {
+            debouncer = new Debouncer(
+                () => { symbolIndexer.indexFile(uri); },
+                FILE_INDEX_DEBOUNCE_MS,
+                { trailing: true }
+            );
+            fileIndexDebouncers.set(key, debouncer);
+        }
+        return debouncer;
+    };
+
+    watcher.onDidChange(uri => getDebouncedIndexer(uri).trigger());
+    watcher.onDidCreate(uri => getDebouncedIndexer(uri).trigger());
     watcher.onDidDelete(uri => {
-        // File deleted - could remove from index
+        // File deleted - cancel any pending debounced indexing and remove from map
+        const key = uri.toString();
+        const debouncer = fileIndexDebouncers.get(key);
+        if (debouncer) {
+            debouncer.cancel();
+            fileIndexDebouncers.delete(key);
+        }
+        // Could also remove from index here
     });
     context.subscriptions.push(watcher);
+
+    // Clean up debouncers on deactivation
+    context.subscriptions.push({
+        dispose: () => {
+            for (const debouncer of fileIndexDebouncers.values()) {
+                debouncer.cancel();
+            }
+            fileIndexDebouncers.clear();
+        }
+    });
 
     const activationTime = Date.now() - startTime;
     outputChannel.appendLine(`RubyMate activated in ${activationTime}ms (lazy loading enabled)`);

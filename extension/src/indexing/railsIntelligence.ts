@@ -1,9 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { SemanticGraphBuilder } from './semanticGraph';
+import { DependencyGraph, Dependency } from '../shared/indexes/dependencyGraph';
+import { LRUCache } from '../shared/dataStructures/lruCache';
 
 /**
  * Rails Convention Intelligence - Navigate between Rails components
+ *
+ * Performance: Uses DependencyGraph for tracking require statements
+ * and LRUCache for caching file resolution results
  */
 
 export interface RailsComponent {
@@ -37,9 +42,158 @@ export class RailsIntelligence {
     private workspaceRoot: string;
     private routes: Map<string, RouteInfo> = new Map();
 
+    // Performance: Use DependencyGraph for tracking require statements
+    private dependencyGraph: DependencyGraph;
+
+    // Performance: Cache file location results (200 entries, 30s TTL)
+    private locationCache: LRUCache<string, vscode.Location | null>;
+
     constructor(graphBuilder: SemanticGraphBuilder, workspaceRoot: string) {
         this.graphBuilder = graphBuilder;
         this.workspaceRoot = workspaceRoot;
+        // Initialize DependencyGraph with Rails load paths
+        this.dependencyGraph = new DependencyGraph({
+            loadPaths: [
+                path.join(workspaceRoot, 'app', 'models'),
+                path.join(workspaceRoot, 'app', 'controllers'),
+                path.join(workspaceRoot, 'app', 'helpers'),
+                path.join(workspaceRoot, 'app', 'services'),
+                path.join(workspaceRoot, 'app', 'jobs'),
+                path.join(workspaceRoot, 'lib')
+            ]
+        });
+        this.locationCache = new LRUCache<string, vscode.Location | null>({ maxSize: 200, maxAge: 30000 });
+    }
+
+    /**
+     * Get the dependency graph for analysis
+     */
+    getDependencyGraph(): DependencyGraph {
+        return this.dependencyGraph;
+    }
+
+    /**
+     * Parse file for require statements and build dependency graph
+     * Performance: Builds dependency graph incrementally as files are parsed
+     */
+    async parseFileDependencies(uri: vscode.Uri): Promise<Dependency[]> {
+        const dependencies: Dependency[] = [];
+        const uriStr = uri.fsPath;
+
+        try {
+            const document = await vscode.workspace.openTextDocument(uri);
+            const text = document.getText();
+            const lines = text.split('\n');
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+
+                // Match: require 'path' or require "path"
+                const requireMatch = line.match(/require\s+['"]([\w\/.]+)['"]/);
+                if (requireMatch) {
+                    this.dependencyGraph.addRequire(uriStr, requireMatch[1], {
+                        uri: uriStr,
+                        line: i,
+                        column: line.indexOf('require')
+                    });
+                    dependencies.push({
+                        from: uriStr,
+                        to: requireMatch[1],
+                        type: 'require',
+                        location: { uri: uriStr, line: i, column: line.indexOf('require') }
+                    });
+                }
+
+                // Match: require_relative 'path'
+                const requireRelativeMatch = line.match(/require_relative\s+['"]([\w\/.]+)['"]/);
+                if (requireRelativeMatch) {
+                    this.dependencyGraph.addRequireRelative(uriStr, requireRelativeMatch[1], {
+                        uri: uriStr,
+                        line: i,
+                        column: line.indexOf('require_relative')
+                    });
+                    dependencies.push({
+                        from: uriStr,
+                        to: requireRelativeMatch[1],
+                        type: 'require_relative',
+                        location: { uri: uriStr, line: i, column: line.indexOf('require_relative') }
+                    });
+                }
+
+                // Match: load 'path'
+                const loadMatch = line.match(/load\s+['"]([\w\/.]+)['"]/);
+                if (loadMatch) {
+                    this.dependencyGraph.addLoad(uriStr, loadMatch[1], {
+                        uri: uriStr,
+                        line: i,
+                        column: line.indexOf('load')
+                    });
+                    dependencies.push({
+                        from: uriStr,
+                        to: loadMatch[1],
+                        type: 'load',
+                        location: { uri: uriStr, line: i, column: line.indexOf('load') }
+                    });
+                }
+
+                // Match: autoload :Constant, 'path'
+                const autoloadMatch = line.match(/autoload\s+:(\w+),\s+['"]([\w\/.]+)['"]/);
+                if (autoloadMatch) {
+                    this.dependencyGraph.addAutoload(uriStr, autoloadMatch[1], autoloadMatch[2], {
+                        uri: uriStr,
+                        line: i,
+                        column: line.indexOf('autoload')
+                    });
+                    dependencies.push({
+                        from: uriStr,
+                        to: autoloadMatch[2],
+                        type: 'autoload',
+                        location: { uri: uriStr, line: i, column: line.indexOf('autoload') }
+                    });
+                }
+            }
+        } catch (error) {
+            // Silently skip files that can't be read
+        }
+
+        return dependencies;
+    }
+
+    /**
+     * Find files that depend on the given file
+     * Performance: O(1) lookup using DependencyGraph
+     */
+    getFileDependents(uri: vscode.Uri): string[] {
+        return this.dependencyGraph.getDependents(uri.fsPath);
+    }
+
+    /**
+     * Find files that the given file depends on
+     * Performance: O(1) lookup using DependencyGraph
+     */
+    getFileDependencies(uri: vscode.Uri): string[] {
+        return this.dependencyGraph.getDependencies(uri.fsPath);
+    }
+
+    /**
+     * Find all transitive dependencies (files affected by changes)
+     */
+    getAffectedFiles(uri: vscode.Uri): string[] {
+        return this.dependencyGraph.getTransitiveDependents(uri.fsPath);
+    }
+
+    /**
+     * Find circular dependencies in the codebase
+     */
+    findCircularDependencies(): string[][] {
+        return this.dependencyGraph.findCircularDependencies();
+    }
+
+    /**
+     * Get recommended file load order (topological sort)
+     */
+    getLoadOrder(): string[] {
+        return this.dependencyGraph.getLoadOrder();
     }
 
     /**
@@ -359,13 +513,25 @@ export class RailsIntelligence {
 
     /**
      * Convert file path to location
+     * Performance: Uses LRUCache for O(1) repeated lookups
      */
     private async fileToLocation(filePath: string): Promise<vscode.Location | undefined> {
+        // Performance: Check cache first
+        const cached = this.locationCache.get(filePath);
+        if (cached !== undefined) {
+            return cached || undefined;
+        }
+
         try {
             const uri = vscode.Uri.file(filePath);
             await vscode.workspace.fs.stat(uri);
-            return new vscode.Location(uri, new vscode.Position(0, 0));
+            const location = new vscode.Location(uri, new vscode.Position(0, 0));
+            // Performance: Cache successful result
+            this.locationCache.set(filePath, location);
+            return location;
         } catch {
+            // Performance: Cache negative result to avoid repeated lookups
+            this.locationCache.set(filePath, null);
             return undefined;
         }
     }

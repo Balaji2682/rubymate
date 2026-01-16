@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Debouncer } from './shared';
 
 /**
  * Status bar states for the RubyMate extension
@@ -18,6 +19,11 @@ export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
     private currentState: ExtensionState = ExtensionState.Initializing;
     private outputChannel: vscode.OutputChannel;
+
+    // Debouncer for temporary message revert - ensures we only revert
+    // after the specified duration from the LAST showTemporaryMessage call
+    private temporaryMessageDebouncer: Debouncer<void> | null = null;
+    private stateBeforeTemporaryMessage: ExtensionState | null = null;
 
     // Icons for different states
     private readonly stateIcons = {
@@ -301,15 +307,41 @@ export class StatusBarManager {
     }
 
     /**
-     * Update status bar with custom text temporarily
+     * Update status bar with custom text temporarily.
+     * Uses Debouncer to handle multiple rapid calls - the revert will only
+     * happen after `durationMs` from the LAST call.
      */
     showTemporaryMessage(message: string, durationMs: number = 3000): void {
-        const originalState = this.currentState;
+        // Capture original state only on first call (before any temporary message)
+        if (this.stateBeforeTemporaryMessage === null) {
+            this.stateBeforeTemporaryMessage = this.currentState;
+        }
+
+        // Show the temporary message
         this.updateStatusBar(this.currentState, message);
 
-        setTimeout(() => {
-            this.updateStatusBar(originalState);
-        }, durationMs);
+        // Cancel existing debouncer if duration changed
+        if (this.temporaryMessageDebouncer) {
+            this.temporaryMessageDebouncer.cancel();
+        }
+
+        // Create a new debouncer with the specified duration
+        // Using Debouncer ensures that multiple rapid calls will only
+        // trigger the revert once, after the last call
+        this.temporaryMessageDebouncer = new Debouncer(
+            () => {
+                const originalState = this.stateBeforeTemporaryMessage;
+                this.stateBeforeTemporaryMessage = null;
+                this.temporaryMessageDebouncer = null;
+                if (originalState !== null) {
+                    this.updateStatusBar(originalState);
+                }
+            },
+            durationMs,
+            { trailing: true }
+        );
+
+        this.temporaryMessageDebouncer.trigger();
     }
 
     /**
@@ -323,6 +355,13 @@ export class StatusBarManager {
      * Dispose of the status bar item
      */
     dispose(): void {
+        // Cancel any pending temporary message revert
+        if (this.temporaryMessageDebouncer) {
+            this.temporaryMessageDebouncer.cancel();
+            this.temporaryMessageDebouncer = null;
+        }
+        this.stateBeforeTemporaryMessage = null;
+
         this.statusBarItem.dispose();
     }
 }
