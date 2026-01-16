@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import * as child_process from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
+import {
+    getShellOptions,
+    detectRubyInstallation,
+    getInstallationInstructions,
+    clearRubyPathCache
+} from './utils/rubyPathResolver';
 
 const execAsync = promisify(child_process.exec);
 
@@ -124,13 +130,25 @@ export class ConfigValidator {
         message: string;
         warning?: string;
         suggestion?: string;
+        detectedPath?: string;
     }> {
         const rubyPath = config.get<string>('rubyPath', 'ruby');
 
         if (!rubyPath || rubyPath.trim() === '') {
+            // Try auto-detection
+            const detected = await detectRubyInstallation();
+            if (detected) {
+                return {
+                    valid: true,
+                    message: 'Ruby path is valid (auto-detected)',
+                    warning: `Using auto-detected Ruby at "${detected.path}"`,
+                    suggestion: `Set rubymate.rubyPath to "${detected.path}" to avoid auto-detection`,
+                    detectedPath: detected.path
+                };
+            }
             return {
                 valid: false,
-                message: 'Ruby path is empty. Please provide a valid path to the Ruby executable.'
+                message: 'Ruby path is empty and auto-detection failed. Please provide a valid path to the Ruby executable.'
             };
         }
 
@@ -145,9 +163,14 @@ export class ConfigValidator {
         }
 
         try {
-            // Try to execute ruby --version
-            const { stdout, stderr } = await execAsync(`${rubyPath} --version`, {
-                shell: process.env.SHELL || '/bin/bash',
+            // Quote the path to handle spaces (platform-appropriate)
+            const quotedPath = process.platform === 'win32'
+                ? `"${rubyPath}"`
+                : `'${rubyPath.replace(/'/g, "'\\''")}'`;
+
+            // Try to execute ruby --version with platform-appropriate shell
+            const { stdout } = await execAsync(`${quotedPath} --version`, {
+                ...getShellOptions(),
                 env: process.env,
                 timeout: 5000 // 5 second timeout
             });
@@ -181,12 +204,26 @@ export class ConfigValidator {
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            this.outputChannel.appendLine(`✗ Ruby validation failed: ${errorMessage}`);
+            this.outputChannel.appendLine(`✗ Ruby validation failed for "${rubyPath}": ${errorMessage}`);
 
             // Cache failed result
             this.validationCache.set(cacheKey, { timestamp: Date.now(), result: false });
 
-            // Provide helpful error message
+            // Try auto-detection as fallback
+            const detected = await detectRubyInstallation();
+            if (detected) {
+                this.outputChannel.appendLine(`✓ Auto-detected Ruby at: ${detected.path} (v${detected.version})`);
+                return {
+                    valid: true,
+                    message: 'Ruby path is valid (auto-detected)',
+                    warning: `Configured path "${rubyPath}" is invalid. Using auto-detected Ruby at "${detected.path}"`,
+                    suggestion: `Update rubymate.rubyPath to "${detected.path}"`,
+                    detectedPath: detected.path
+                };
+            }
+
+            // Provide helpful error message with platform-specific instructions
+            const instructions = getInstallationInstructions();
             let message = `Ruby executable not found at "${rubyPath}".`;
 
             if (errorMessage.includes('ENOENT')) {
@@ -194,6 +231,8 @@ export class ConfigValidator {
             } else if (errorMessage.includes('timeout')) {
                 message += ' The command timed out (took longer than 5 seconds).';
             }
+
+            message += ` ${instructions.message}.`;
 
             return {
                 valid: false,
@@ -345,6 +384,7 @@ export class ConfigValidator {
      */
     clearCache(): void {
         this.validationCache.clear();
+        clearRubyPathCache(); // Also clear the ruby path resolver cache
         this.outputChannel.appendLine('Validation cache cleared');
     }
 

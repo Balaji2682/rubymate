@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as net from 'net';
 import * as path from 'path';
+import { getRubyPath } from './utils/rubyPathResolver';
 
 export interface DebugConfiguration extends vscode.DebugConfiguration {
     request: 'launch' | 'attach';
@@ -191,10 +192,10 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
         this.outputChannel = outputChannel;
     }
 
-    createDebugAdapterDescriptor(
+    async createDebugAdapterDescriptor(
         session: vscode.DebugSession,
         executable: vscode.DebugAdapterExecutable | undefined
-    ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+    ): Promise<vscode.DebugAdapterDescriptor | null | undefined> {
         const config = session.configuration as DebugConfiguration;
 
         this.outputChannel.appendLine(`Creating debug adapter for session: ${session.name}`);
@@ -210,7 +211,8 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
         }
 
         // Launch configuration - use rdbg
-        const rubyPath = vscode.workspace.getConfiguration('rubymate').get<string>('rubyPath', 'ruby');
+        // Use auto-detected Ruby path (cross-platform)
+        const rubyPath = await getRubyPath();
         const rdbgPath = this.findRdbgPath(session.workspaceFolder);
 
         if (!rdbgPath) {

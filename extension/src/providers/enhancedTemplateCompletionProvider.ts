@@ -22,12 +22,21 @@ export class EnhancedTemplateCompletionProvider implements vscode.CompletionItem
         this.railsHelpers = this.buildRailsHelpers();
     }
 
-    async provideCompletionItems(
+    provideCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken,
         context: vscode.CompletionContext
-    ): Promise<vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList>> {
+    ): vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList> {
+        return this.provideCompletionItemsAsync(document, position, token, context);
+    }
+
+    private async provideCompletionItemsAsync(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        token: vscode.CancellationToken,
+        context: vscode.CompletionContext
+    ): Promise<vscode.CompletionItem[] | undefined> {
         const lineText = document.lineAt(position.line).text;
         const linePrefix = lineText.substring(0, position.character);
 

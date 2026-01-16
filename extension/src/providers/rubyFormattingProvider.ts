@@ -27,8 +27,6 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
     }
 
     private async format(document: vscode.TextDocument, range?: vscode.Range): Promise<vscode.TextEdit[]> {
-        const config = vscode.workspace.getConfiguration('rubymate');
-        const rubyPath = config.get<string>('rubyPath', 'ruby');
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
         const cwd = workspaceFolder?.uri.fsPath || path.dirname(document.fileName);
 
