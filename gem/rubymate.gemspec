@@ -5,8 +5,8 @@ require_relative "lib/rubymate/version"
 Gem::Specification.new do |spec|
   spec.name = "rubymate"
   spec.version = Rubymate::VERSION
-  spec.authors = ["Your Name"]
-  spec.email = ["your.email@example.com"]
+  spec.authors = ["Balaji R"]
+  spec.email = ["admin@zengrid.dev"]
 
   spec.summary = "RubyMate - Unified Ruby LSP add-on combining Solargraph, formatting, and Rails support"
   spec.description = "A comprehensive Ruby LSP add-on that integrates Solargraph, RuboCop formatting, Rails support, and test running capabilities into a single, seamless VS Code experience"
