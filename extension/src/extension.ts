@@ -496,9 +496,12 @@ async function ensureDebugProvidersLoaded(context: vscode.ExtensionContext): Pro
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
     );
+    // Add factory to subscriptions for proper disposal
+    context.subscriptions.push({ dispose: () => debugAdapterFactory.dispose() });
 
     // Debug session manager
     debugSessionManager = new DebugSessionManager(outputChannel);
+    debugSessionManager.setDebugAdapterFactory(debugAdapterFactory); // Connect factory for process cleanup
     debugSessionManager.register(context);
 
     debugProvidersLoaded = true;

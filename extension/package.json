@@ -610,6 +610,27 @@
                 "type": "object",
                 "description": "Path mappings for remote debugging",
                 "default": {}
+              },
+              "debuggerStartupTimeout": {
+                "type": "number",
+                "description": "Timeout in milliseconds for the debugger to start (increase for large Rails apps)",
+                "default": 15000
+              },
+              "useTerminal": {
+                "type": "boolean",
+                "description": "Run debugger in integrated terminal (required for interactive apps like rails console)",
+                "default": false
+              },
+              "disableSpring": {
+                "type": "boolean",
+                "description": "Disable Rails Spring preloader (recommended for debugging)",
+                "default": false
+              },
+              "rubyVersionManager": {
+                "type": "string",
+                "enum": ["auto", "rbenv", "rvm", "asdf", "mise", "chruby", "none"],
+                "description": "Ruby version manager to use for PATH setup",
+                "default": "auto"
               }
             }
           },
