@@ -4,13 +4,13 @@ First off, thank you for considering contributing to RubyMate! It's people like 
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [RubyMate Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [support@example.com].
+This project and everyone participating in it is governed by the [RubyMate Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [[info@zengrid.dev](mailto:info@zengrid.dev)].
 
 ## How Can I Contribute?
 
 ### Reporting Bugs
 
-Before creating bug reports, please check the [issue tracker](https://github.com/your-username/rubymate/issues) as you might find out that you don't need to create one. When you are creating a bug report, please include as many details as possible:
+Before creating bug reports, please check the [issue tracker](https://github.com/Balaji2682/rubymate/issues) as you might find out that you don't need to create one. When you are creating a bug report, please include as many details as possible:
 
 * **Use a clear and descriptive title**
 * **Describe the exact steps to reproduce the problem**
@@ -77,7 +77,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR-USERNAME/rubymate.git
+git clone https://github.com/Balaji2682/rubymate.git
 cd rubymate
 
 # Install dependencies
