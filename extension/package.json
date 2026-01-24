@@ -2,7 +2,7 @@
   "name": "rubymate",
   "displayName": "Ruby - Complete Ruby and Rails Extension - (RubyMate)",
   "description": "The ultimate Ruby and Rails extension for VS Code. Features: Solargraph IntelliSense, Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, ERB/Haml/Slim Template Intelligence with path helpers, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
-  "version": "0.2.9",
+  "version": "0.2.13",
   "publisher": "BalajiR",
   "icon": "images/icon.png",
   "galleryBanner": {
@@ -788,7 +788,7 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^2.22.0",
+    "@vscode/vsce": "^3.7.1",
     "chai": "^6.2.2",
     "esbuild": "0.25.0",
     "glob": "^13.0.0",

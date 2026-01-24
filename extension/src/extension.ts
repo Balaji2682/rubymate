@@ -38,12 +38,11 @@ let outputChannel: vscode.OutputChannel;
 let symbolIndexer: AdvancedRubyIndexer;
 let navigationCommands: NavigationCommands;
 let railsCommands: any; // Lazy loaded
-let debugSessionManager: any; // Lazy loaded
+let debugSessionManager: any;
 let railsStatusBar: vscode.StatusBarItem;
 let testExplorer: any; // Lazy loaded
 let railsCommandsLoaded = false;
 let testExplorerLoaded = false;
-let debugProvidersLoaded = false;
 let extensionContext: vscode.ExtensionContext; // Store context for lazy loaders
 
 // Configuration validation
@@ -172,9 +171,34 @@ export async function activate(context: vscode.ExtensionContext) {
         });
     }
 
-    // ========== PHASE 3: Debug Providers (Lazy - on first debug) ==========
-    // Register debug providers lazily (will be loaded when debugging starts)
-    registerDebugProvidersLazy(context);
+    // ========== PHASE 3: Debug Providers ==========
+    // Register debug providers directly (no lazy loading needed since extension
+    // already activates on onLanguage:ruby)
+    const {
+        RubyDebugConfigurationProvider,
+        RubyDebugAdapterDescriptorFactory,
+        DebugSessionManager
+    } = await import('./debugAdapter');
+
+    // Debug configuration provider
+    const debugConfigProvider = new RubyDebugConfigurationProvider(outputChannel);
+    context.subscriptions.push(
+        vscode.debug.registerDebugConfigurationProvider('ruby', debugConfigProvider)
+    );
+
+    // Debug adapter descriptor factory (register ONCE)
+    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel);
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
+    );
+    context.subscriptions.push({ dispose: () => debugAdapterFactory.dispose() });
+
+    // Debug session manager
+    debugSessionManager = new DebugSessionManager(outputChannel);
+    debugSessionManager.setDebugAdapterFactory(debugAdapterFactory);
+    debugSessionManager.register(context);
+
+    outputChannel.appendLine('Debug providers registered');
 
     // ========== PHASE 4: Workspace Indexing (Background) ==========
     // Index workspace symbols in background (don't block activation)
@@ -473,41 +497,6 @@ async function ensureTestExplorerLoaded(context: vscode.ExtensionContext): Promi
     outputChannel.appendLine('Test explorer loaded');
 }
 
-async function ensureDebugProvidersLoaded(context: vscode.ExtensionContext): Promise<void> {
-    if (debugProvidersLoaded) {
-        return;
-    }
-
-    outputChannel.appendLine('Loading debug providers...');
-    const {
-        RubyDebugConfigurationProvider,
-        RubyDebugAdapterDescriptorFactory,
-        DebugSessionManager
-    } = await import('./debugAdapter');
-
-    // Debug configuration provider
-    const debugConfigProvider = new RubyDebugConfigurationProvider(outputChannel);
-    context.subscriptions.push(
-        vscode.debug.registerDebugConfigurationProvider('ruby', debugConfigProvider)
-    );
-
-    // Debug adapter descriptor factory
-    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel);
-    context.subscriptions.push(
-        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
-    );
-    // Add factory to subscriptions for proper disposal
-    context.subscriptions.push({ dispose: () => debugAdapterFactory.dispose() });
-
-    // Debug session manager
-    debugSessionManager = new DebugSessionManager(outputChannel);
-    debugSessionManager.setDebugAdapterFactory(debugAdapterFactory); // Connect factory for process cleanup
-    debugSessionManager.register(context);
-
-    debugProvidersLoaded = true;
-    outputChannel.appendLine('Debug providers loaded');
-}
-
 async function checkRailsProject(): Promise<boolean> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
@@ -688,33 +677,6 @@ function registerProviders(context: vscode.ExtensionContext) {
     outputChannel.appendLine('  - Hover for Documentation');
     outputChannel.appendLine('✓ Formatting provider registered (RuboCop)');
     outputChannel.appendLine('✓ Auto-end completion provider registered');
-}
-
-function registerDebugProvidersLazy(context: vscode.ExtensionContext) {
-    // Create lightweight proxy providers that load the real ones on first use
-    const lazyDebugConfigProvider: vscode.DebugConfigurationProvider = {
-        async resolveDebugConfiguration(folder, config, token) {
-            await ensureDebugProvidersLoaded(context);
-            return config;
-        }
-    };
-
-    const lazyDebugAdapterFactory: vscode.DebugAdapterDescriptorFactory = {
-        async createDebugAdapterDescriptor(session, executable) {
-            await ensureDebugProvidersLoaded(context);
-            // The real factory is now loaded, return undefined to use it
-            return undefined;
-        }
-    };
-
-    context.subscriptions.push(
-        vscode.debug.registerDebugConfigurationProvider('ruby', lazyDebugConfigProvider)
-    );
-    context.subscriptions.push(
-        vscode.debug.registerDebugAdapterDescriptorFactory('ruby', lazyDebugAdapterFactory)
-    );
-
-    outputChannel.appendLine('Debug providers registered (lazy loading enabled)');
 }
 
 async function indexWorkspace(context: vscode.ExtensionContext) {

@@ -99,6 +99,20 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
             });
         }
 
+        // Validate that the file is executable before proceeding
+        const validationError = this.validateDebugTarget(config.program, folder);
+        if (validationError) {
+            return vscode.window.showErrorMessage(
+                validationError.message,
+                ...validationError.actions
+            ).then(selection => {
+                if (selection && validationError.actionHandlers[selection]) {
+                    validationError.actionHandlers[selection]();
+                }
+                return undefined;
+            });
+        }
+
         // Set defaults
         config.cwd = config.cwd || (folder ? folder.uri.fsPath : '${workspaceFolder}');
         config.useBundler = config.useBundler !== undefined ? config.useBundler : this.shouldUseBundler(folder);
@@ -108,6 +122,138 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
         this.outputChannel.appendLine(`Debug configuration resolved: ${JSON.stringify(config, null, 2)}`);
 
         return config;
+    }
+
+    /**
+     * Validate if the debug target is an executable Ruby file
+     */
+    private validateDebugTarget(
+        program: string,
+        folder: vscode.WorkspaceFolder | undefined
+    ): { message: string; actions: string[]; actionHandlers: Record<string, () => void> } | null {
+        // Resolve ${file} and ${workspaceFolder} variables
+        let resolvedProgram = program;
+        const editor = vscode.window.activeTextEditor;
+
+        if (program.includes('${file}') && editor) {
+            resolvedProgram = program.replace('${file}', editor.document.uri.fsPath);
+        }
+        if (program.includes('${workspaceFolder}') && folder) {
+            resolvedProgram = program.replace('${workspaceFolder}', folder.uri.fsPath);
+        }
+
+        const fileName = path.basename(resolvedProgram);
+        const isRailsProject = this.isRailsProject(folder);
+
+        // Check for Gemfile
+        if (fileName === 'Gemfile' || fileName === 'Gemfile.lock') {
+            return {
+                message: 'Cannot debug Gemfile - this is a configuration file, not an executable script.',
+                actions: ['Learn More'],
+                actionHandlers: {
+                    'Learn More': () => {
+                        vscode.window.showInformationMessage(
+                            'Gemfiles define gem dependencies and cannot be executed directly. ' +
+                            'To debug your application, select a Ruby script file (e.g., a test file or main application file) instead.'
+                        );
+                    }
+                }
+            };
+        }
+
+        // Check for Rails-specific files that need Rails environment
+        if (isRailsProject) {
+            const railsComponentPatterns = [
+                { pattern: /app\/controllers\/.*\.rb$/, type: 'controller' },
+                { pattern: /app\/models\/.*\.rb$/, type: 'model' },
+                { pattern: /app\/helpers\/.*\.rb$/, type: 'helper' },
+                { pattern: /app\/mailers\/.*\.rb$/, type: 'mailer' },
+                { pattern: /app\/jobs\/.*\.rb$/, type: 'job' },
+                { pattern: /app\/services\/.*\.rb$/, type: 'service' },
+                { pattern: /app\/channels\/.*\.rb$/, type: 'channel' },
+                { pattern: /config\/.*\.rb$/, type: 'config' }
+            ];
+
+            for (const { pattern, type } of railsComponentPatterns) {
+                if (pattern.test(resolvedProgram.replace(/\\/g, '/'))) {
+                    const testPath = resolvedProgram
+                        .replace(/\\/g, '/')
+                        .replace(/^.*\/app\//, 'spec/')
+                        .replace(/\.rb$/, '_spec.rb');
+
+                    const hasTestFile = fs.existsSync(testPath);
+                    const actions = hasTestFile
+                        ? ['Debug Test File', 'Use Rails Runner', 'Learn More']
+                        : ['Use Rails Runner', 'Learn More'];
+
+                    return {
+                        message: `Cannot debug Rails ${type} directly - it needs the Rails environment to run.`,
+                        actions,
+                        actionHandlers: {
+                            'Debug Test File': () => {
+                                if (hasTestFile) {
+                                    vscode.window.showTextDocument(vscode.Uri.file(testPath)).then(() => {
+                                        vscode.window.showInformationMessage(
+                                            'Test file opened. Use "Debug RSpec - Current File" to debug this file.'
+                                        );
+                                    });
+                                }
+                            },
+                            'Use Rails Runner': () => {
+                                const config = vscode.workspace.getConfiguration('launch');
+                                const launchConfig = config.get('configurations') as any[] || [];
+
+                                const hasRunnerConfig = launchConfig.some(
+                                    c => c.name && c.name.includes('Rails Runner')
+                                );
+
+                                if (!hasRunnerConfig) {
+                                    vscode.window.showInformationMessage(
+                                        'Add a "Debug with Rails Runner" configuration to your launch.json to debug Rails components. ' +
+                                        'Use: rails runner "require \'path/to/file\'; YourClass.new"'
+                                    );
+                                } else {
+                                    vscode.window.showInformationMessage(
+                                        'Use the "Debug with Rails Runner" configuration to debug this file.'
+                                    );
+                                }
+                            },
+                            'Learn More': () => {
+                                vscode.window.showInformationMessage(
+                                    `Rails ${type} files cannot be executed directly because they depend on the Rails framework. ` +
+                                    'Options: (1) Debug the corresponding test/spec file, (2) Use "rails runner" to load the file, ' +
+                                    '(3) Debug the Rails server and trigger the code through a request.'
+                                );
+                            }
+                        }
+                    };
+                }
+            }
+        }
+
+        // Check for spec files without proper runner
+        if (resolvedProgram.endsWith('_spec.rb') && !program.includes('rspec')) {
+            return {
+                message: 'RSpec files should be debugged using the RSpec runner.',
+                actions: ['Use RSpec Debug Config', 'Learn More'],
+                actionHandlers: {
+                    'Use RSpec Debug Config': () => {
+                        vscode.window.showInformationMessage(
+                            'Use "Debug RSpec - Current File" from the debug configurations dropdown instead.'
+                        );
+                    },
+                    'Learn More': () => {
+                        vscode.window.showInformationMessage(
+                            'RSpec files need to be run with the RSpec runner. Use the "Debug RSpec - Current File" or ' +
+                            '"Debug RSpec - Current Line" configurations from the debug dropdown.'
+                        );
+                    }
+                }
+            };
+        }
+
+        // File appears to be executable
+        return null;
     }
 
     /**
@@ -132,13 +278,18 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
         ];
 
         // Add test framework specific configurations
+        // On Windows, use direct command; on Unix, use bin/ directory
+        const rspecCommand = process.platform === 'win32'
+            ? 'rspec'
+            : '${workspaceFolder}/bin/rspec';
+
         if (testFramework === 'rspec' || testFramework === 'both') {
             configurations.push(
                 {
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug RSpec - Current File',
-                    program: '${workspaceFolder}/bin/rspec',
+                    program: rspecCommand,
                     args: ['${file}'],
                     cwd: '${workspaceFolder}',
                     useBundler: true
@@ -147,7 +298,7 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug RSpec - Current Line',
-                    program: '${workspaceFolder}/bin/rspec',
+                    program: rspecCommand,
                     args: ['${file}:${lineNumber}'],
                     cwd: '${workspaceFolder}',
                     useBundler: true
@@ -193,12 +344,23 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
         });
 
         if (isRailsProject) {
+            // On Windows, use direct rails command; on Unix, use bin/rails
+            const railsCommand = process.platform === 'win32'
+                ? 'rails'
+                : '${workspaceFolder}/bin/rails';
+            const rakeCommand = process.platform === 'win32'
+                ? 'rake'
+                : '${workspaceFolder}/bin/rake';
+            const rspecCommand = process.platform === 'win32'
+                ? 'rspec'
+                : '${workspaceFolder}/bin/rspec';
+
             configurations.push(
                 {
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug Rails Server',
-                    program: '${workspaceFolder}/bin/rails',
+                    program: railsCommand,
                     args: ['server'],
                     cwd: '${workspaceFolder}',
                     useBundler: true,
@@ -212,7 +374,7 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug Rails Console',
-                    program: '${workspaceFolder}/bin/rails',
+                    program: railsCommand,
                     args: ['console'],
                     cwd: '${workspaceFolder}',
                     useBundler: true,
@@ -226,7 +388,7 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug Rake Task',
-                    program: '${workspaceFolder}/bin/rake',
+                    program: rakeCommand,
                     args: ['${input:rakeTask}'],
                     cwd: '${workspaceFolder}',
                     useBundler: true,
@@ -239,7 +401,7 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
                     type: 'ruby',
                     request: 'launch',
                     name: 'Debug Rails Job',
-                    program: '${workspaceFolder}/bin/rails',
+                    program: railsCommand,
                     args: ['runner', '${input:jobClass}.perform_now'],
                     cwd: '${workspaceFolder}',
                     useBundler: true,
@@ -405,9 +567,18 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
         // Separator before the actual program
         args.push('--');
 
-        // Add the program to debug (handle paths with spaces)
+        // Add the program to debug (normalize path for platform)
         if (config.program) {
-            args.push(config.program);
+            // Normalize path separators for the current platform
+            const normalizedProgram = path.normalize(config.program);
+
+            // On Windows, check if we need to prepend 'ruby' for script files
+            // This is needed for bin/rails, bin/rake, etc. which are shell scripts
+            if (process.platform === 'win32' && this.isWindowsScriptFile(normalizedProgram)) {
+                args.push('ruby');
+            }
+
+            args.push(normalizedProgram);
         }
 
         // Add program arguments
@@ -416,6 +587,42 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
         }
 
         return args;
+    }
+
+    /**
+     * Check if a file is a Windows script that needs to be run with 'ruby' prefix
+     */
+    private isWindowsScriptFile(programPath: string): boolean {
+        // Files in bin/ directory without .rb extension are typically shell scripts
+        // that need to be run with ruby on Windows
+        const fileName = path.basename(programPath);
+        const isInBinDir = programPath.includes(path.join('bin', fileName));
+        const hasRbExtension = fileName.endsWith('.rb');
+
+        // If it's in bin/ and doesn't have .rb extension, it's likely a script
+        if (isInBinDir && !hasRbExtension) {
+            return true;
+        }
+
+        // Also check if file exists and doesn't have extension
+        if (!hasRbExtension && fs.existsSync(programPath)) {
+            try {
+                // Read first few bytes to check for shebang
+                const fd = fs.openSync(programPath, 'r');
+                const buffer = Buffer.alloc(20);
+                fs.readSync(fd, buffer, 0, 20, 0);
+                fs.closeSync(fd);
+
+                const header = buffer.toString('utf8', 0, 20);
+                // If starts with shebang, it's a script
+                return header.startsWith('#!');
+            } catch {
+                // If we can't read it, assume it might be a script
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async spawnRdbgProcess(
