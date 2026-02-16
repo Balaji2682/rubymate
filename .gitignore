@@ -22,3 +22,6 @@ Gemfile.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# RubyMate index cache (workspace-scoped)
+.rubymate/

@@ -503,17 +503,125 @@ export class EnhancedTemplateCompletionProvider implements vscode.CompletionItem
                 kind: vscode.CompletionItemKind.Function
             },
 
-            // Turbo helpers (Rails 7+)
+            // Turbo helpers (Rails 7+ / Hotwire)
             {
                 name: 'turbo_frame_tag',
                 snippet: 'turbo_frame_tag "${1:id}" do\n  $0\nend',
-                documentation: 'Creates a Turbo Frame.',
+                documentation: 'Creates a Turbo Frame container.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_frame_tag_src',
+                snippet: 'turbo_frame_tag "${1:id}", src: ${2:path} do\n  $0\nend',
+                documentation: 'Creates a Turbo Frame with lazy loading.',
                 kind: vscode.CompletionItemKind.Function
             },
             {
                 name: 'turbo_stream',
-                snippet: 'turbo_stream.${1|replace,update,append,prepend,remove|}("${2:target}")',
-                documentation: 'Returns a Turbo Stream action.',
+                snippet: 'turbo_stream.${1|append,prepend,replace,update,remove,before,after,morph,refresh|}("${2:target}")',
+                documentation: 'Returns a Turbo Stream action (9 actions available).',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.append',
+                snippet: 'turbo_stream.append "${1:target}" do\n  $0\nend',
+                documentation: 'Appends content inside the target element.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.prepend',
+                snippet: 'turbo_stream.prepend "${1:target}" do\n  $0\nend',
+                documentation: 'Prepends content inside the target element.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.replace',
+                snippet: 'turbo_stream.replace "${1:target}" do\n  $0\nend',
+                documentation: 'Replaces the target element entirely.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.update',
+                snippet: 'turbo_stream.update "${1:target}" do\n  $0\nend',
+                documentation: 'Updates the content inside the target element.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.remove',
+                snippet: 'turbo_stream.remove "${1:target}"',
+                documentation: 'Removes the target element from the DOM.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.before',
+                snippet: 'turbo_stream.before "${1:target}" do\n  $0\nend',
+                documentation: 'Inserts content before the target element.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.after',
+                snippet: 'turbo_stream.after "${1:target}" do\n  $0\nend',
+                documentation: 'Inserts content after the target element.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.morph',
+                snippet: 'turbo_stream.morph "${1:target}" do\n  $0\nend',
+                documentation: 'Morphs the target element using idiomorph.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream.refresh',
+                snippet: 'turbo_stream.refresh',
+                documentation: 'Triggers a full page refresh.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'turbo_stream_from',
+                snippet: 'turbo_stream_from ${1:streamable}',
+                documentation: 'Subscribes to Turbo Stream broadcasts from a model or channel.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'broadcast_append_to',
+                snippet: 'broadcast_append_to "${1:stream}", target: "${2:target}", partial: "${3:partial}"',
+                documentation: 'Broadcasts an append action to subscribers.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'broadcast_prepend_to',
+                snippet: 'broadcast_prepend_to "${1:stream}", target: "${2:target}", partial: "${3:partial}"',
+                documentation: 'Broadcasts a prepend action to subscribers.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'broadcast_replace_to',
+                snippet: 'broadcast_replace_to "${1:stream}", target: "${2:target}", partial: "${3:partial}"',
+                documentation: 'Broadcasts a replace action to subscribers.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'broadcast_update_to',
+                snippet: 'broadcast_update_to "${1:stream}", target: "${2:target}", partial: "${3:partial}"',
+                documentation: 'Broadcasts an update action to subscribers.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'broadcast_remove_to',
+                snippet: 'broadcast_remove_to "${1:stream}", target: "${2:target}"',
+                documentation: 'Broadcasts a remove action to subscribers.',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'dom_id',
+                snippet: 'dom_id(${1:record}${2:, "${3:prefix}"})',
+                documentation: 'Generates a DOM ID for a record (e.g., "post_1").',
+                kind: vscode.CompletionItemKind.Function
+            },
+            {
+                name: 'dom_class',
+                snippet: 'dom_class(${1:record}${2:, "${3:prefix}"})',
+                documentation: 'Generates a DOM class for a record.',
                 kind: vscode.CompletionItemKind.Function
             },
 

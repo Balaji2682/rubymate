@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
 import { SymbolIndex, IndexedSymbol } from './shared/indexes/symbolIndex';
 import { RangeTree } from './shared/dataStructures/intervalTree';
+import { saveBloomFilter, loadBloomFilter } from './indexing/indexSerializer';
 
 export interface RubySymbol {
     name: string;
@@ -55,6 +56,15 @@ interface IndexStats {
     lastIndexTime: number;
 }
 
+/** Schema version for cache invalidation on breaking changes */
+const INDEX_SCHEMA_VERSION = 1;
+
+interface IndexMeta {
+    version: number;
+    createdAt: number;
+    workspaceRoot: string;
+}
+
 export class AdvancedRubyIndexer {
     private symbols: Map<string, RubySymbol[]> = new Map();
     private typeInfo: Map<string, TypeInfo> = new Map();
@@ -73,8 +83,18 @@ export class AdvancedRubyIndexer {
     private outputChannel: vscode.OutputChannel;
     private context: vscode.ExtensionContext;
 
-    // Cache paths
+    // Cache paths - workspace-scoped for isolation between projects
+    private get workspaceRoot(): string | undefined {
+        return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    }
+
     private get cacheDir(): string {
+        const root = this.workspaceRoot;
+        if (root) {
+            // Workspace-scoped: .rubymate/ in project root
+            return path.join(root, '.rubymate');
+        }
+        // Fallback to global storage for non-workspace scenarios
         return path.join(this.context.globalStorageUri.fsPath, 'index-cache');
     }
 
@@ -84,6 +104,14 @@ export class AdvancedRubyIndexer {
 
     private get metadataCachePath(): string {
         return path.join(this.cacheDir, 'metadata.json');
+    }
+
+    private get indexMetaPath(): string {
+        return path.join(this.cacheDir, 'index.meta.json');
+    }
+
+    private get bloomFilterPath(): string {
+        return path.join(this.cacheDir, 'bloom.bin');
     }
 
     constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
@@ -113,6 +141,26 @@ export class AdvancedRubyIndexer {
      */
     private async loadCache(): Promise<void> {
         try {
+            // Check schema version first
+            const metaData = await fs.readFile(this.indexMetaPath, 'utf-8');
+            const meta: IndexMeta = JSON.parse(metaData);
+
+            if (meta.version !== INDEX_SCHEMA_VERSION) {
+                this.outputChannel.appendLine(
+                    `Cache version mismatch (${meta.version} vs ${INDEX_SCHEMA_VERSION}), will reindex`
+                );
+                return;
+            }
+
+            // Validate workspace root matches
+            if (this.workspaceRoot && meta.workspaceRoot !== this.workspaceRoot) {
+                this.outputChannel.appendLine('Cache workspace mismatch, will reindex');
+                return;
+            }
+
+            // Load BloomFilter from binary (Phase 2: avoid rebuilding)
+            const cachedBloomFilter = await loadBloomFilter(this.bloomFilterPath);
+
             const symbolsData = await fs.readFile(this.symbolsCachePath, 'utf-8');
             const metadataData = await fs.readFile(this.metadataCachePath, 'utf-8');
 
@@ -129,12 +177,55 @@ export class AdvancedRubyIndexer {
                 this.fileMetadata.set(uri, metadata as FileMetadata);
             }
 
+            // CRITICAL: Rebuild symbolIndex and fileRangeTrees from loaded symbols
+            // Pass cached BloomFilter to avoid expensive rebuild
+            this.rebuildIndexesFromCache(cachedBloomFilter);
+
             const totalSymbols = Array.from(this.symbols.values())
                 .reduce((sum, arr) => sum + arr.length, 0);
 
-            this.outputChannel.appendLine(`Loaded ${totalSymbols} symbols from cache`);
+            const bloomStatus = cachedBloomFilter ? 'restored' : 'rebuilt';
+            this.outputChannel.appendLine(`Loaded ${totalSymbols} symbols from cache (BloomFilter: ${bloomStatus})`);
         } catch (error) {
             this.outputChannel.appendLine('No cache found, will perform full indexing');
+        }
+    }
+
+    /**
+     * Rebuild symbolIndex and fileRangeTrees after loading from cache
+     * This ensures fast lookups work immediately after startup
+     * @param cachedBloomFilter - Optional persisted BloomFilter to reuse
+     */
+    private rebuildIndexesFromCache(cachedBloomFilter?: import('./shared/dataStructures/bloomFilter').BloomFilter | null): void {
+        // Create SymbolIndex with cached BloomFilter if available
+        // This avoids expensive O(n) BloomFilter population
+        this.symbolIndex = cachedBloomFilter
+            ? new SymbolIndex(50000, cachedBloomFilter)
+            : new SymbolIndex(50000);
+        this.fileRangeTrees.clear();
+
+        for (const [uriStr, symbols] of this.symbols) {
+            // Rebuild symbolIndex (BloomFilter already populated if cached)
+            const indexedSymbols: IndexedSymbol[] = symbols.map(s => ({
+                name: s.name,
+                kind: s.kind,
+                location: s.location,
+                containerName: s.containerName,
+                detail: s.detail,
+                fullyQualifiedName: s.containerName ? `${s.containerName}::${s.name}` : s.name
+            }));
+            this.symbolIndex.addSymbols(indexedSymbols);
+
+            // Rebuild RangeTree for position-based lookups
+            const rangeTree = new RangeTree<RubySymbol>();
+            for (const symbol of symbols) {
+                const range = symbol.location.range;
+                rangeTree.insertRange({
+                    start: { line: range.start.line, column: range.start.character },
+                    end: { line: range.end.line, column: range.end.character }
+                }, symbol);
+            }
+            this.fileRangeTrees.set(uriStr, rangeTree);
         }
     }
 
@@ -143,6 +234,14 @@ export class AdvancedRubyIndexer {
      */
     private async saveCache(): Promise<void> {
         try {
+            // Write index meta first (for version validation on load)
+            const meta: IndexMeta = {
+                version: INDEX_SCHEMA_VERSION,
+                createdAt: Date.now(),
+                workspaceRoot: this.workspaceRoot || ''
+            };
+            await fs.writeFile(this.indexMetaPath, JSON.stringify(meta), 'utf-8');
+
             const symbolsData = Object.fromEntries(
                 Array.from(this.symbols.entries()).map(([uri, symbols]) => [
                     uri,
@@ -152,8 +251,13 @@ export class AdvancedRubyIndexer {
 
             const metadataData = Object.fromEntries(this.fileMetadata);
 
-            await fs.writeFile(this.symbolsCachePath, JSON.stringify(symbolsData), 'utf-8');
-            await fs.writeFile(this.metadataCachePath, JSON.stringify(metadataData), 'utf-8');
+            // Save in parallel for better performance
+            await Promise.all([
+                fs.writeFile(this.symbolsCachePath, JSON.stringify(symbolsData), 'utf-8'),
+                fs.writeFile(this.metadataCachePath, JSON.stringify(metadataData), 'utf-8'),
+                // Phase 2: Save BloomFilter to binary for fast restore
+                saveBloomFilter(this.symbolIndex.getBloomFilter(), this.bloomFilterPath)
+            ]);
 
             this.outputChannel.appendLine('Index cache saved');
         } catch (error) {

@@ -488,6 +488,12 @@
         "title": "Smart Search",
         "category": "Search",
         "icon": "$(search)"
+      },
+      {
+        "command": "rubymate.reindexStimulus",
+        "title": "Re-index Stimulus Controllers",
+        "category": "Hotwire",
+        "icon": "$(refresh)"
       }
     ],
     "snippets": [
@@ -555,6 +561,16 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically insert 'end' keyword when creating Ruby blocks (def, class, if, etc.)"
+        },
+        "rubymate.hotwire.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Hotwire stack support (Stimulus, Turbo Streams, Turbo Frames, Turbo Drive)"
+        },
+        "rubymate.hotwire.stimulusPath": {
+          "type": "string",
+          "default": "app/javascript/controllers",
+          "description": "Path to Stimulus controllers directory (relative to workspace root)"
         }
       }
     },

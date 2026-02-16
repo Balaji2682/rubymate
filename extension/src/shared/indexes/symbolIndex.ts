@@ -36,8 +36,9 @@ export class SymbolIndex {
     /** File index: file URI → symbols in that file */
     private fileIndex: Map<string, Set<IndexedSymbol>> = new Map();
 
-    /** Trie for fast prefix search */
-    private nameTrie: Trie<IndexedSymbol> = new Trie();
+    /** Trie for fast prefix search - built lazily on first prefix query */
+    private nameTrie: Trie<IndexedSymbol> | null = null;
+    private trieBuilt: boolean = false;
 
     /** Bloom filter for fast negative lookups */
     private nameBloom: BloomFilter;
@@ -51,11 +52,43 @@ export class SymbolIndex {
     /** Fully qualified name index for precise lookups */
     private fqnIndex: Map<string, IndexedSymbol> = new Map();
 
-    constructor(expectedSymbols: number = 100000) {
-        this.nameBloom = new BloomFilter({
+    constructor(expectedSymbols: number = 100000, existingBloomFilter?: BloomFilter) {
+        this.nameBloom = existingBloomFilter ?? new BloomFilter({
             expectedElements: expectedSymbols,
             falsePositiveRate: 0.01
         });
+    }
+
+    /**
+     * Get the internal BloomFilter for persistence
+     */
+    getBloomFilter(): BloomFilter {
+        return this.nameBloom;
+    }
+
+    /**
+     * Ensure Trie is built before prefix search (lazy initialization)
+     */
+    private ensureTrieBuilt(): Trie<IndexedSymbol> {
+        if (!this.trieBuilt || !this.nameTrie) {
+            this.nameTrie = new Trie<IndexedSymbol>();
+            // Populate from nameIndex
+            for (const [name, symbols] of this.nameIndex) {
+                for (const symbol of symbols) {
+                    this.nameTrie.insert(name, symbol);
+                }
+            }
+            this.trieBuilt = true;
+        }
+        return this.nameTrie;
+    }
+
+    /**
+     * Invalidate the Trie (will be rebuilt on next prefix search)
+     */
+    invalidateTrie(): void {
+        this.trieBuilt = false;
+        this.nameTrie = null;
     }
 
     /**
@@ -108,8 +141,10 @@ export class SymbolIndex {
         }
         this.fileIndex.get(fileUri)!.add(symbol);
 
-        // Add to trie for prefix search
-        this.nameTrie.insert(name, symbol);
+        // Invalidate Trie - will be rebuilt lazily on next prefix search
+        if (this.trieBuilt) {
+            this.invalidateTrie();
+        }
 
         // Add to bloom filter
         this.nameBloom.add(name);
@@ -184,9 +219,11 @@ export class SymbolIndex {
     /**
      * Find symbols by prefix
      * Performance: O(k + r) where k = prefix length, r = result count
+     * Note: First call triggers lazy Trie build
      */
     findByPrefix(prefix: string, limit?: number): IndexedSymbol[] {
-        return this.nameTrie.searchPrefix(prefix, limit);
+        const trie = this.ensureTrieBuilt();
+        return trie.searchPrefix(prefix, limit);
     }
 
     /**
@@ -361,8 +398,10 @@ export class SymbolIndex {
                 this.fqnIndex.delete(symbol.fullyQualifiedName);
             }
 
-            // Remove from trie (use content-based equality)
-            this.nameTrie.removeItem(symbol.name, (s) => this.symbolEquals(s, symbol));
+            // Remove from trie if built (use content-based equality)
+            if (this.nameTrie) {
+                this.nameTrie.removeItem(symbol.name, (s) => this.symbolEquals(s, symbol));
+            }
         }
 
         // Remove from file index
@@ -389,7 +428,7 @@ export class SymbolIndex {
         this.caseInsensitiveIndex.clear();
         this.containerIndex.clear();
         this.fqnIndex.clear();
-        this.nameTrie.clear();
+        this.invalidateTrie();
         this.nameBloom.clear();
     }
 

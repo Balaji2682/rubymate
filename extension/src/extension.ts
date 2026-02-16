@@ -29,6 +29,13 @@ import { TelemetryManager } from './telemetryManager';
 import { RatingReminderManager } from './ratingReminder';
 import { Debouncer } from './shared';
 
+// Hotwire support
+import { StimulusIndexer } from './hotwire/stimulusIndexer';
+import { StimulusCompletionProvider } from './hotwire/stimulusCompletionProvider';
+import { StimulusDefinitionProvider } from './hotwire/stimulusDefinitionProvider';
+import { HotwireHoverProvider } from './hotwire/hotwireHoverProvider';
+import { TurboCompletionProvider } from './hotwire/turboCompletionProvider';
+
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
 // import { RubyTestExplorer } from './testExplorer'; // Lazy loaded
@@ -635,6 +642,85 @@ function registerProviders(context: vscode.ExtensionContext) {
     outputChannel.appendLine('  - Go to definition: render @object, render "partial", custom helpers');
     outputChannel.appendLine('  - I18n translation key completion');
     outputChannel.appendLine('  - Smart partial resolution (layouts, files, model-based)');
+
+    // ========== HOTWIRE FEATURES ==========
+    const hotwireConfig = vscode.workspace.getConfiguration('rubymate');
+    const hotwireEnabled = hotwireConfig.get<boolean>('hotwire.enabled', true);
+
+    if (hotwireEnabled) {
+        // Initialize asynchronously without blocking provider registration
+        (async () => {
+        try {
+            // Initialize Stimulus indexer
+            const stimulusIndexer = new StimulusIndexer(context, outputChannel);
+            await stimulusIndexer.initialize();
+            context.subscriptions.push({ dispose: () => stimulusIndexer.dispose() });
+
+            // Languages for Hotwire support (ERB, Haml, Slim, HTML)
+            const hotwireLanguages: vscode.DocumentSelector = [
+                { language: 'erb', scheme: 'file' },
+                { language: 'haml', scheme: 'file' },
+                { language: 'slim', scheme: 'file' },
+                { language: 'html', scheme: 'file' }
+            ];
+
+            // Register Stimulus completion provider
+            const stimulusCompletionProvider = new StimulusCompletionProvider(stimulusIndexer);
+            context.subscriptions.push(
+                vscode.languages.registerCompletionItemProvider(
+                    hotwireLanguages,
+                    stimulusCompletionProvider,
+                    '"', "'", '-', '#', ' '  // Trigger characters
+                )
+            );
+
+            // Register Stimulus definition provider
+            const stimulusDefinitionProvider = new StimulusDefinitionProvider(stimulusIndexer);
+            context.subscriptions.push(
+                vscode.languages.registerDefinitionProvider(
+                    hotwireLanguages,
+                    stimulusDefinitionProvider
+                )
+            );
+
+            // Register Hotwire hover provider
+            const hotwireHoverProvider = new HotwireHoverProvider(stimulusIndexer);
+            context.subscriptions.push(
+                vscode.languages.registerHoverProvider(
+                    hotwireLanguages,
+                    hotwireHoverProvider
+                )
+            );
+
+            // Register Turbo completion provider
+            const turboCompletionProvider = new TurboCompletionProvider();
+            context.subscriptions.push(
+                vscode.languages.registerCompletionItemProvider(
+                    hotwireLanguages,
+                    turboCompletionProvider,
+                    '-', '"', "'"  // Trigger characters
+                )
+            );
+
+            // Register reindex command
+            context.subscriptions.push(
+                vscode.commands.registerCommand('rubymate.reindexStimulus', async () => {
+                    await stimulusIndexer.reindex();
+                    vscode.window.showInformationMessage('Stimulus controllers reindexed');
+                })
+            );
+
+            outputChannel.appendLine('✓ Hotwire support registered');
+            outputChannel.appendLine('  - Stimulus controller discovery & IntelliSense');
+            outputChannel.appendLine('  - data-controller, data-action, data-*-target completions');
+            outputChannel.appendLine('  - Go-to-definition for Stimulus controllers and actions');
+            outputChannel.appendLine('  - Turbo Stream/Frame/Drive attribute completions');
+            outputChannel.appendLine('  - Hover documentation for Hotwire attributes');
+        } catch (error) {
+            outputChannel.appendLine(`Failed to initialize Hotwire support: ${error}`);
+        }
+        })();
+    }
 
     // Format on save (if enabled)
     context.subscriptions.push(
