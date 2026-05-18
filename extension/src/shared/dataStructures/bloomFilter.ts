@@ -362,6 +362,20 @@ export class CountingBloomFilter {
         return this.counters.length;
     }
 
+    get fillRatio(): number {
+        let occupied = 0;
+        for (let i = 0; i < this.size; i++) {
+            if (this.getCounter(i) > 0) {
+                occupied++;
+            }
+        }
+        return occupied / this.size;
+    }
+
+    get estimatedFalsePositiveRate(): number {
+        return Math.pow(this.fillRatio, this.hashCount);
+    }
+
     private getCounter(index: number): number {
         const byteIndex = Math.floor(index / 2);
         const isHighNibble = index % 2 === 1;

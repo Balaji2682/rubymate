@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
 import { CallGraphIndex, MethodCall } from '../shared/indexes/callGraphIndex';
 import { LRUCache } from '../shared/dataStructures/lruCache';
+import { ParserService } from '../parsing';
 
 /**
  * Provides call hierarchy like IDE Ctrl+Alt+H
@@ -17,7 +18,10 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
     // Performance: Cache parsed file calls to avoid re-parsing
     private fileCallCache: LRUCache<string, MethodCall[]>;
 
-    constructor(private indexer: AdvancedRubyIndexer) {
+    constructor(
+        private indexer: AdvancedRubyIndexer,
+        private readonly parserService?: ParserService
+    ) {
         // Performance: 100 files cached, 60 second TTL
         this.fileCallCache = new LRUCache<string, MethodCall[]>({ maxSize: 100, maxAge: 60000 });
     }
@@ -77,99 +81,44 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
         }
 
         const calls: MethodCall[] = [];
-        const text = document.getText();
-        const lines = text.split('\n');
 
-        let currentMethod: { name: string; containerName?: string; startLine: number } | undefined;
-        let currentClass: string | undefined;
+        if (!this.parserService) {
+            this.fileCallCache.set(uriStr, calls);
+            return calls;
+        }
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-
-            // Skip comments
-            if (trimmed.startsWith('#')) continue;
-
-            // Track class context
-            const classMatch = trimmed.match(/^class\s+([A-Z][A-Za-z0-9_:]*)/);
-            if (classMatch) {
-                currentClass = classMatch[1];
-                continue;
-            }
-
-            // Track method definitions
-            const methodMatch = trimmed.match(/^def\s+(self\.)?([a-z_][a-z0-9_?!=]*)/);
-            if (methodMatch) {
-                currentMethod = {
-                    name: methodMatch[2],
-                    containerName: currentClass,
-                    startLine: i
-                };
-
-                // Add method to call graph index
-                this.callGraph.addMethod(methodMatch[2], currentClass, {
-                    uri: uriStr,
-                    startLine: i,
-                    startColumn: line.indexOf('def'),
-                    endLine: i,
-                    endColumn: line.length
-                }, {
-                    isClassMethod: !!methodMatch[1]
-                });
-                continue;
-            }
-
-            // Find method calls within current method
-            if (currentMethod) {
-                // Match: .method_name, method_name(), self.method_name
-                const callPatterns = [
-                    /\.([a-z_][a-z0-9_?!]*)\s*(?:\(|$|[^a-z0-9_])/g,
-                    /\b([a-z_][a-z0-9_?!]*)\s*\(/g,
-                ];
-
-                for (const pattern of callPatterns) {
-                    let match;
-                    while ((match = pattern.exec(trimmed)) !== null) {
-                        const methodName = match[1];
-                        // Skip Ruby keywords
-                        if (['if', 'unless', 'while', 'until', 'for', 'case', 'when', 'begin', 'rescue', 'end', 'return', 'yield', 'raise', 'puts', 'print', 'require', 'include'].includes(methodName)) {
-                            continue;
-                        }
-
-                        const call: MethodCall = {
-                            caller: {
-                                name: currentMethod.name,
-                                containerName: currentMethod.containerName,
-                                location: {
-                                    uri: uriStr,
-                                    startLine: currentMethod.startLine,
-                                    startColumn: 0,
-                                    endLine: currentMethod.startLine,
-                                    endColumn: 0
-                                }
-                            },
-                            callee: {
-                                name: methodName
-                            },
-                            callLocation: {
-                                uri: uriStr,
-                                startLine: i,
-                                startColumn: line.indexOf(methodName),
-                                endLine: i,
-                                endColumn: line.indexOf(methodName) + methodName.length
-                            }
-                        };
-
-                        calls.push(call);
-                        this.callGraph.addCall(call);
+        const parsed = await this.parserService.parseRuby(document);
+        for (const { method, call } of this.parserService.collectMethodCalls(parsed.value)) {
+            const containerName = method.metadata.get('containerName') as string | undefined;
+            const mappedCall: MethodCall = {
+                caller: {
+                    name: method.name,
+                    containerName,
+                    location: {
+                        uri: uriStr,
+                        startLine: method.range.start.line,
+                        startColumn: method.range.start.character,
+                        endLine: method.range.end.line,
+                        endColumn: method.range.end.character
                     }
+                },
+                callee: {
+                    name: call.method
+                },
+                callLocation: {
+                    uri: uriStr,
+                    startLine: call.location.line,
+                    startColumn: call.location.character,
+                    endLine: call.location.line,
+                    endColumn: call.location.character + call.method.length
                 }
-            }
+            };
 
-            // End of method
-            if (trimmed === 'end' && currentMethod) {
-                currentMethod = undefined;
-            }
+            calls.push(mappedCall);
+            this.callGraph.addMethod(method.name, containerName, mappedCall.caller.location, {
+                isClassMethod: method.isClassMethod
+            });
+            this.callGraph.addCall(mappedCall);
         }
 
         // Performance: Cache the parsed calls
@@ -248,7 +197,7 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
 
                         for (const call of calls) {
                             // Find the method that contains this call
-                            const containingMethod = this.findContainingMethod(document, call.range.start);
+                            const containingMethod = await this.findContainingMethod(document, call.range.start);
 
                             if (containingMethod) {
                                 const fromItem = new vscode.CallHierarchyItem(
@@ -288,32 +237,18 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
 
         try {
             const document = await vscode.workspace.openTextDocument(item.uri);
-            const methodBody = document.getText(item.range);
+            const calls = await this.buildFileCallGraph(item.uri, document);
+            const selectedCalls = calls.filter(call => this.isCallFromHierarchyItem(call, item));
+            const callRangesByMethod = new Map<string, vscode.Range[]>();
 
-            // Find all method calls within this method
-            // Matches: .method_name, method_name(), self.method_name
-            const callPatterns = [
-                /\.(\w+)/g,                    // .method_name
-                /(\w+)\s*\(/g,                 // method_name(
-                /self\.(\w+)/g,                // self.method_name
-                /super/g,                      // super calls
-            ];
-
-            const calledMethods = new Set<string>();
-
-            for (const pattern of callPatterns) {
-                let match;
-                while ((match = pattern.exec(methodBody)) !== null) {
-                    if (match[1]) {
-                        calledMethods.add(match[1]);
-                    } else if (match[0] === 'super') {
-                        calledMethods.add(item.name); // super calls the same method name in parent
-                    }
-                }
+            for (const call of selectedCalls) {
+                const ranges = callRangesByMethod.get(call.callee.name) ?? [];
+                ranges.push(this.rangeFromCallLocation(call.callLocation));
+                callRangesByMethod.set(call.callee.name, ranges);
             }
 
             // For each called method, try to find its definition
-            for (const methodName of calledMethods) {
+            for (const [methodName, callRanges] of callRangesByMethod) {
                 if (token.isCancellationRequested) {
                     break;
                 }
@@ -330,11 +265,8 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
                         symbol.location.range
                     );
 
-                    // Find where in the current method this call occurs
-                    const callRanges = await this.findMethodCalls(document, methodName, item.range);
-
                     outgoingCalls.push(
-                        new vscode.CallHierarchyOutgoingCall(toItem, callRanges.map(c => c.range))
+                        new vscode.CallHierarchyOutgoingCall(toItem, callRanges)
                     );
                 }
             }
@@ -345,49 +277,66 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
         return outgoingCalls.length > 0 ? outgoingCalls : undefined;
     }
 
+    private isCallFromHierarchyItem(call: MethodCall, item: vscode.CallHierarchyItem): boolean {
+        if (call.caller.name !== item.name || call.caller.location.uri !== item.uri.toString()) {
+            return false;
+        }
+
+        const itemContainer = this.containerNameFromHierarchyItem(item);
+        if (itemContainer && call.caller.containerName && itemContainer !== call.caller.containerName) {
+            return false;
+        }
+
+        return this.rangeFromCallLocation(call.caller.location).intersection(item.range) !== undefined;
+    }
+
+    private containerNameFromHierarchyItem(item: vscode.CallHierarchyItem): string | undefined {
+        const detail = item.detail?.trim();
+        if (!detail || detail === 'Global') {
+            return undefined;
+        }
+
+        const containerName = detail.startsWith('in ') ? detail.slice(3).trim() : detail;
+        return containerName === 'Global' ? undefined : containerName;
+    }
+
+    private rangeFromCallLocation(location: MethodCall['callLocation']): vscode.Range {
+        return new vscode.Range(
+            location.startLine,
+            location.startColumn,
+            location.endLine,
+            location.endColumn
+        );
+    }
+
     private async findMethodCalls(
         document: vscode.TextDocument,
         methodName: string,
         withinRange?: vscode.Range
     ): Promise<{ range: vscode.Range }[]> {
-        const calls: { range: vscode.Range }[] = [];
-        const text = withinRange ? document.getText(withinRange) : document.getText();
-        const startOffset = withinRange ? document.offsetAt(withinRange.start) : 0;
+        if (!this.parserService) {
+            return [];
+        }
 
-        // Pattern to match method calls
-        const patterns = [
-            new RegExp(`\\.${methodName}\\b`, 'g'),        // .method_name
-            new RegExp(`\\b${methodName}\\s*\\(`, 'g'),    // method_name(
-            new RegExp(`\\b${methodName}\\s+\\w`, 'g'),    // method_name arg
-        ];
+        return (await this.parserService.findMethodCallRanges(document, methodName, withinRange))
+            .map(range => ({ range }));
+    }
 
-        for (const pattern of patterns) {
-            let match;
-            while ((match = pattern.exec(text)) !== null) {
-                const position = document.positionAt(startOffset + match.index);
-                const line = document.lineAt(position.line);
-
-                // Skip comments and strings
-                if (line.text.trim().startsWith('#')) {
-                    continue;
-                }
-
-                const range = new vscode.Range(
-                    position,
-                    document.positionAt(startOffset + match.index + match[0].length)
-                );
-
-                calls.push({ range });
+    private async findContainingMethod(
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): Promise<{ name: string; containerName?: string; range: vscode.Range } | undefined> {
+        if (this.parserService) {
+            const method = await this.parserService.findContainingMethod(document, position);
+            if (method) {
+                return {
+                    name: method.name,
+                    containerName: method.metadata.get('containerName') as string | undefined,
+                    range: method.range
+                };
             }
         }
 
-        return calls;
-    }
-
-    private findContainingMethod(
-        document: vscode.TextDocument,
-        position: vscode.Position
-    ): { name: string; containerName?: string; range: vscode.Range } | undefined {
         // Get all methods in this file
         const fileSymbols = this.indexer.getFileSymbols(document.uri);
         const methods = fileSymbols.filter(

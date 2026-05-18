@@ -5,6 +5,7 @@ import * as fs from 'fs/promises';
 import { SymbolIndex, IndexedSymbol } from './shared/indexes/symbolIndex';
 import { RangeTree } from './shared/dataStructures/intervalTree';
 import { saveBloomFilter, loadBloomFilter } from './indexing/indexSerializer';
+import { ParserService } from './parsing';
 
 export interface RubySymbol {
     name: string;
@@ -57,12 +58,13 @@ interface IndexStats {
 }
 
 /** Schema version for cache invalidation on breaking changes */
-const INDEX_SCHEMA_VERSION = 1;
+const INDEX_SCHEMA_VERSION = 2;
 
 interface IndexMeta {
     version: number;
     createdAt: number;
     workspaceRoot: string;
+    parserCacheVersion?: string;
 }
 
 export class AdvancedRubyIndexer {
@@ -82,6 +84,7 @@ export class AdvancedRubyIndexer {
     private indexQueue: vscode.Uri[] = [];
     private outputChannel: vscode.OutputChannel;
     private context: vscode.ExtensionContext;
+    private parserService: ParserService;
 
     // Cache paths - workspace-scoped for isolation between projects
     private get workspaceRoot(): string | undefined {
@@ -114,9 +117,14 @@ export class AdvancedRubyIndexer {
         return path.join(this.cacheDir, 'bloom.bin');
     }
 
-    constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+    constructor(
+        context: vscode.ExtensionContext,
+        outputChannel: vscode.OutputChannel,
+        parserService?: ParserService
+    ) {
         this.context = context;
         this.outputChannel = outputChannel;
+        this.parserService = parserService ?? new ParserService(context, outputChannel);
         // Performance: Initialize SymbolIndex with expected ~50k symbols for optimal bloom filter sizing
         this.symbolIndex = new SymbolIndex(50000);
     }
@@ -155,6 +163,11 @@ export class AdvancedRubyIndexer {
             // Validate workspace root matches
             if (this.workspaceRoot && meta.workspaceRoot !== this.workspaceRoot) {
                 this.outputChannel.appendLine('Cache workspace mismatch, will reindex');
+                return;
+            }
+
+            if (meta.parserCacheVersion !== this.parserService.getCacheVersion()) {
+                this.outputChannel.appendLine('Cache parser version changed, will reindex');
                 return;
             }
 
@@ -238,7 +251,8 @@ export class AdvancedRubyIndexer {
             const meta: IndexMeta = {
                 version: INDEX_SCHEMA_VERSION,
                 createdAt: Date.now(),
-                workspaceRoot: this.workspaceRoot || ''
+                workspaceRoot: this.workspaceRoot || '',
+                parserCacheVersion: this.parserService.getCacheVersion()
             };
             await fs.writeFile(this.indexMetaPath, JSON.stringify(meta), 'utf-8');
 
@@ -513,8 +527,8 @@ export class AdvancedRubyIndexer {
             const checksum = this.calculateChecksum(content);
             const uriStr = uri.toString();
 
-            // Extract symbols with advanced parsing
-            const symbols = await this.extractSymbolsAdvanced(document);
+            // Extract symbols with the configured parser service.
+            const symbols = await this.parserService.extractRubySymbols(document);
 
             if (symbols.length > 0) {
                 // Performance: Remove old symbols from SymbolIndex before adding new ones
@@ -554,6 +568,16 @@ export class AdvancedRubyIndexer {
 
                 // Extract type information
                 await this.extractTypeInfo(document, symbols);
+            } else {
+                this.symbolIndex.removeFileSymbols(uriStr);
+                this.symbols.delete(uriStr);
+                this.fileRangeTrees.delete(uriStr);
+                this.fileMetadata.set(uriStr, {
+                    uri: uriStr,
+                    checksum,
+                    lastIndexed: Date.now(),
+                    symbolCount: 0
+                });
             }
         } catch (error) {
             // Silently skip files that can't be indexed

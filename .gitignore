@@ -25,3 +25,5 @@ Thumbs.db
 
 # RubyMate index cache (workspace-scoped)
 .rubymate/
+/.graphifyignore
+/graphify-out/

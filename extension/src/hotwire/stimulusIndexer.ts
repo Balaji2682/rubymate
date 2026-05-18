@@ -23,6 +23,7 @@ import {
 } from './types';
 import { Trie } from '../shared/dataStructures/trie';
 import { BloomFilter } from '../shared/dataStructures/bloomFilter';
+import { ParserService } from '../parsing';
 
 export class StimulusIndexer {
     private controllers: Map<string, StimulusController> = new Map();
@@ -46,9 +47,10 @@ export class StimulusIndexer {
 
     constructor(
         private context: vscode.ExtensionContext,
-        outputChannel: vscode.OutputChannel
+        outputChannel: vscode.OutputChannel,
+        parserService?: ParserService
     ) {
-        this.parser = new StimulusParser();
+        this.parser = new StimulusParser(parserService);
         this.outputChannel = outputChannel;
         this.stimulusPath = this.getStimulusPath();
     }
@@ -282,12 +284,12 @@ export class StimulusIndexer {
             const content = await fs.readFile(filePath, 'utf-8');
 
             // Verify it's a valid Stimulus controller
-            if (!this.parser.isValidController(content)) {
+            if (!(await this.parser.isValidController(content, filePath))) {
                 return;
             }
 
             const stats = await fs.stat(filePath);
-            const controller = this.parser.parseController(content, filePath, stats.mtimeMs);
+            const controller = await this.parser.parseController(content, filePath, stats.mtimeMs);
 
             if (controller) {
                 this.controllers.set(controller.name, controller);

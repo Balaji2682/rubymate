@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { ParserService } from '../parsing';
 
 /**
  * Provides "Find All References" functionality like IDE Alt+F7
@@ -7,7 +8,8 @@ import { AdvancedRubyIndexer } from '../advancedIndexer';
  */
 export class RubyReferenceProvider implements vscode.ReferenceProvider {
     constructor(
-        private indexer: AdvancedRubyIndexer
+        private indexer: AdvancedRubyIndexer,
+        private readonly parserService?: ParserService
     ) {}
 
     async provideReferences(
@@ -92,7 +94,7 @@ export class RubyReferenceProvider implements vscode.ReferenceProvider {
 
                                     try {
                                         const fileDocument = await vscode.workspace.openTextDocument(fileUri);
-                                        const locations = this.findWordOccurrences(fileDocument, word, context);
+                                        const locations = await this.findWordOccurrences(fileDocument, word, context);
                                         references.push(...locations);
 
                                         processed++;
@@ -173,11 +175,15 @@ export class RubyReferenceProvider implements vscode.ReferenceProvider {
         return undefined;
     }
 
-    private findWordOccurrences(
+    private async findWordOccurrences(
         document: vscode.TextDocument,
         word: string,
         context: vscode.ReferenceContext
-    ): vscode.Location[] {
+    ): Promise<vscode.Location[]> {
+        if (this.parserService) {
+            return this.parserService.findReferenceLocations(document, word, context.includeDeclaration);
+        }
+
         const locations: vscode.Location[] = [];
         const text = document.getText();
         const escapedWord = this.escapeRegex(word);

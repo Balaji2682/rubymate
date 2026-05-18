@@ -14,12 +14,20 @@ import {
 } from './types';
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { ParserService } from '../parsing';
 
 export class StimulusParser {
+    constructor(private readonly parserService?: ParserService) {}
+
     /**
      * Parse a Stimulus controller file and extract metadata
      */
-    parseController(content: string, filePath: string, mtime: number): StimulusController | null {
+    async parseController(content: string, filePath: string, mtime: number): Promise<StimulusController | null> {
+        const treeSitterController = await this.parserService?.parseStimulusController(content, filePath, mtime);
+        if (treeSitterController) {
+            return treeSitterController;
+        }
+
         const controllerName = this.extractControllerName(filePath);
         if (!controllerName) {
             return null;
@@ -254,7 +262,12 @@ export class StimulusParser {
     /**
      * Check if content is a valid Stimulus controller
      */
-    isValidController(content: string): boolean {
+    async isValidController(content: string, filePath: string = 'controller.js'): Promise<boolean> {
+        const treeSitterResult = await this.parserService?.isStimulusController(content, filePath);
+        if (typeof treeSitterResult === 'boolean') {
+            return treeSitterResult;
+        }
+
         // Check for Stimulus controller pattern
         const patterns = [
             /extends\s+(?:Stimulus\.)?Controller/,

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Gem Explorer** - Dedicated sidebar panel for Ruby gem management
+  - Visual tree view of all gems from `Gemfile.lock`, grouped by Gemfile group
+  - Distinguishes direct dependencies from transitive dependencies
+  - One-click outdated gem detection (`bundle outdated`)
+  - Security audit via `bundle audit` with vulnerability reporting
+  - Right-click context menu: open on RubyGems.org, browse source, update, copy name/spec
+  - Auto-refresh on `Gemfile` / `Gemfile.lock` changes
+  - Bundle install and bundle update commands from toolbar
+
 ## [0.1.0] - 2025-01-XX
 
 ### Added

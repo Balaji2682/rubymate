@@ -29,12 +29,16 @@ import { TelemetryManager } from './telemetryManager';
 import { RatingReminderManager } from './ratingReminder';
 import { Debouncer } from './shared';
 
+// Gem Explorer
+import { GemExplorerProvider } from './gemExplorer';
+
 // Hotwire support
-import { StimulusIndexer } from './hotwire/stimulusIndexer';
-import { StimulusCompletionProvider } from './hotwire/stimulusCompletionProvider';
-import { StimulusDefinitionProvider } from './hotwire/stimulusDefinitionProvider';
-import { HotwireHoverProvider } from './hotwire/hotwireHoverProvider';
-import { TurboCompletionProvider } from './hotwire/turboCompletionProvider';
+import { StimulusIndexer } from './hotwire';
+import { StimulusCompletionProvider } from './hotwire';
+import { StimulusDefinitionProvider } from './hotwire';
+import { HotwireHoverProvider } from './hotwire';
+import { TurboCompletionProvider } from './hotwire';
+import { ParserService } from './parsing';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -72,6 +76,10 @@ let databaseCommands: DatabaseCommands;
 // Intelligent indexing
 let intelligentIndexer: IntelligentIndexer;
 let intelligentNavigationCommands: IntelligentNavigationCommands;
+let parserService: ParserService;
+
+// Gem Explorer
+let gemExplorer: GemExplorerProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
     const startTime = Date.now();
@@ -135,8 +143,11 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // ========== PHASE 1: Core Features (Immediate) ==========
+    parserService = new ParserService(context, outputChannel);
+    await parserService.initialize();
+
     // Initialize advanced symbol indexer with persistent caching
-    symbolIndexer = new AdvancedRubyIndexer(context, outputChannel);
+    symbolIndexer = new AdvancedRubyIndexer(context, outputChannel, parserService);
     await symbolIndexer.initialize(); // Load cache from disk
 
     // Initialize navigation commands (lightweight, core feature)
@@ -160,6 +171,9 @@ export async function activate(context: vscode.ExtensionContext) {
     // ========== INTELLIGENT INDEXING ==========
     // Initialize intelligent semantic indexer
     await initializeIntelligentIndexing(context);
+
+    // ========== GEM EXPLORER ==========
+    await initializeGemExplorer(context);
 
     // ========== PHASE 2: Rails Features (Lazy - if Rails project) ==========
     const isRailsProject = await checkRailsProject();
@@ -364,7 +378,7 @@ async function initializeDatabaseFeatures(context: vscode.ExtensionContext): Pro
 async function initializeIntelligentIndexing(context: vscode.ExtensionContext): Promise<void> {
     try {
         // Initialize intelligent indexer
-        intelligentIndexer = new IntelligentIndexer(context, schemaParser, outputChannel);
+        intelligentIndexer = new IntelligentIndexer(context, schemaParser, outputChannel, parserService);
         await intelligentIndexer.initialize();
 
         // Initialize navigation commands
@@ -388,6 +402,42 @@ async function initializeIntelligentIndexing(context: vscode.ExtensionContext): 
         outputChannel.appendLine('Intelligent indexing initialized');
     } catch (error) {
         outputChannel.appendLine(`Intelligent indexing not available: ${error}`);
+    }
+}
+
+// ========== Gem Explorer Initialization ==========
+
+async function initializeGemExplorer(context: vscode.ExtensionContext): Promise<void> {
+    try {
+        gemExplorer = new GemExplorerProvider(outputChannel);
+        await gemExplorer.initialize();
+
+        // Register tree view
+        const treeView = vscode.window.createTreeView('rubymate.gemExplorer', {
+            treeDataProvider: gemExplorer,
+            showCollapseAll: true
+        });
+        context.subscriptions.push(treeView);
+
+        // Register commands
+        gemExplorer.registerCommands(context);
+
+        // Set context key for when clause (show view only if Gemfile exists)
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workspaceRoot) {
+            const gemfilePath = path.join(workspaceRoot, 'Gemfile');
+            try {
+                await vscode.workspace.fs.stat(vscode.Uri.file(gemfilePath));
+                vscode.commands.executeCommand('setContext', 'workspaceHasGemfile', true);
+            } catch {
+                vscode.commands.executeCommand('setContext', 'workspaceHasGemfile', false);
+            }
+        }
+
+        context.subscriptions.push({ dispose: () => gemExplorer.dispose() });
+        outputChannel.appendLine('Gem Explorer initialized');
+    } catch (error) {
+        outputChannel.appendLine(`Gem Explorer not available: ${error}`);
     }
 }
 
@@ -547,7 +597,7 @@ function registerProviders(context: vscode.ExtensionContext) {
     // Comprehensive definition provider using our index
     // Handles: classes, methods, requires, constants
     // Shows popup when multiple results found (like IDE)
-    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer);
+    const rubyDefinitionProvider = new RubyDefinitionProvider(symbolIndexer, parserService);
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(rubySelector, rubyDefinitionProvider)
     );
@@ -555,7 +605,7 @@ function registerProviders(context: vscode.ExtensionContext) {
     // IDE-like features
 
     // Find All References (like IDE's Alt+F7)
-    const referenceProvider = new RubyReferenceProvider(symbolIndexer);
+    const referenceProvider = new RubyReferenceProvider(symbolIndexer, parserService);
     context.subscriptions.push(
         vscode.languages.registerReferenceProvider(rubySelector, referenceProvider)
     );
@@ -567,13 +617,13 @@ function registerProviders(context: vscode.ExtensionContext) {
     );
 
     // Type Hierarchy (like IDE's Ctrl+H)
-    const typeHierarchyProvider = new RubyTypeHierarchyProvider(symbolIndexer);
+    const typeHierarchyProvider = new RubyTypeHierarchyProvider(symbolIndexer, parserService);
     context.subscriptions.push(
         vscode.languages.registerTypeHierarchyProvider(rubySelector, typeHierarchyProvider)
     );
 
     // Call Hierarchy (like IDE's Ctrl+Alt+H)
-    const callHierarchyProvider = new RubyCallHierarchyProvider(symbolIndexer);
+    const callHierarchyProvider = new RubyCallHierarchyProvider(symbolIndexer, parserService);
     context.subscriptions.push(
         vscode.languages.registerCallHierarchyProvider(rubySelector, callHierarchyProvider)
     );
@@ -652,7 +702,7 @@ function registerProviders(context: vscode.ExtensionContext) {
         (async () => {
         try {
             // Initialize Stimulus indexer
-            const stimulusIndexer = new StimulusIndexer(context, outputChannel);
+            const stimulusIndexer = new StimulusIndexer(context, outputChannel, parserService);
             await stimulusIndexer.initialize();
             context.subscriptions.push({ dispose: () => stimulusIndexer.dispose() });
 

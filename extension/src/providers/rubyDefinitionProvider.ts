@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { ClassNode, NodeType } from '../indexing/rubyParser';
+import { ParserService } from '../parsing';
 import { Result, ok, err, tryAsync } from '../shared/utilities/result';
 import { LRUCache } from '../shared/dataStructures/lruCache';
 
@@ -28,7 +30,8 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
     private pathCache: LRUCache<string, vscode.Uri | null>;
 
     constructor(
-        private indexer: AdvancedRubyIndexer
+        private indexer: AdvancedRubyIndexer,
+        private readonly parserService?: ParserService
     ) {
         this.pathCache = new LRUCache<string, vscode.Uri | null>({ maxSize: 200, maxAge: 30000 });
     }
@@ -196,7 +199,7 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         position: vscode.Position
     ): Promise<vscode.Location | vscode.Location[] | undefined> {
         // Get context - try to find the class this method belongs to
-        const className = this.findClassContext(document, position);
+        const className = await this.findClassContext(document, position);
 
         // Search for method in the class
         if (className) {
@@ -245,7 +248,27 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
     /**
      * Find the class context from the current position
      */
-    private findClassContext(document: vscode.TextDocument, position: vscode.Position): string | undefined {
+    private async findClassContext(document: vscode.TextDocument, position: vscode.Position): Promise<string | undefined> {
+        if (this.parserService) {
+            const parsed = await this.parserService.parseRuby(document);
+            const stack = [...parsed.value];
+            let best: ClassNode | undefined;
+
+            while (stack.length > 0) {
+                const node = stack.shift()!;
+                if (node.type === NodeType.Class || node.type === NodeType.Module) {
+                    if (node.range.contains(position) && (!best || node.range.start.isAfter(best.range.start))) {
+                        best = node as ClassNode;
+                    }
+                }
+                stack.push(...node.children);
+            }
+
+            if (best) {
+                return best.name;
+            }
+        }
+
         // Search upwards for class definition
         for (let i = position.line; i >= 0; i--) {
             const line = document.lineAt(i).text;

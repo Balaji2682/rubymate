@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
-import { RubyParser, ClassNode, MethodNode, NodeType } from './rubyParser';
+import { ClassNode, MethodNode, NodeType } from './rubyParser';
 import { SemanticGraphBuilder, ClassInfo, MethodInfo, Association, AssociationType } from './semanticGraph';
 import { TypeInferenceEngine, InferenceContext } from './typeInference';
 import { SmartSearchEngine, SearchContext, SearchResult } from './smartSearch';
@@ -12,6 +12,7 @@ import { SchemaParser } from '../database/schemaParser';
 import { RubySymbol } from '../advancedIndexer';
 import { AsyncQueue, RateLimitedQueue } from '../shared/utilities/asyncQueue';
 import { EventEmitter } from '../shared/utilities/eventEmitter';
+import { ParserService } from '../parsing';
 
 /**
  * Intelligent Indexer - Orchestrates all semantic analysis components
@@ -44,6 +45,7 @@ export class IntelligentIndexer {
     private referenceTracker: ReferenceTracker;
     private railsIntelligence: RailsIntelligence;
     private schemaParser: SchemaParser;
+    private parserService: ParserService;
 
     // Performance: Controlled concurrency with AsyncQueue
     private indexingQueue: AsyncQueue<void>;
@@ -63,17 +65,19 @@ export class IntelligentIndexer {
     constructor(
         context: vscode.ExtensionContext,
         schemaParser: SchemaParser,
-        outputChannel: vscode.OutputChannel
+        outputChannel: vscode.OutputChannel,
+        parserService?: ParserService
     ) {
         this.context = context;
         this.outputChannel = outputChannel;
         this.schemaParser = schemaParser;
+        this.parserService = parserService ?? new ParserService(context, outputChannel);
 
         // Initialize components
         this.graphBuilder = new SemanticGraphBuilder(outputChannel);
         this.typeInference = new TypeInferenceEngine(this.graphBuilder, schemaParser, outputChannel);
         this.smartSearch = new SmartSearchEngine(this.graphBuilder);
-        this.referenceTracker = new ReferenceTracker(this.graphBuilder, outputChannel);
+        this.referenceTracker = new ReferenceTracker(this.graphBuilder, outputChannel, this.parserService);
 
         // Performance: Initialize AsyncQueue with controlled concurrency (4 parallel files)
         this.indexingQueue = new AsyncQueue<void>({ concurrency: 4, timeout: 30000 });
@@ -258,14 +262,14 @@ export class IntelligentIndexer {
             this.fileHashes.set(uri.toString(), hash);
 
             // Parse the file
-            const parser = new RubyParser(document);
-            const ast = parser.parse();
+            const parsed = await this.parserService.parseRuby(document);
+            const ast = parsed.value;
 
             // Extract semantic information
             await this.extractSemanticInfo(uri, document, ast);
 
             // Track references
-            await this.referenceTracker.trackReferencesInDocument(document);
+            await this.referenceTracker.trackReferencesInDocument(document, ast);
 
             // Index symbols for search
             const symbols = await this.extractSymbols(uri, ast);
@@ -555,7 +559,11 @@ export class IntelligentIndexer {
      * Calculate file hash
      */
     private calculateHash(content: string): string {
-        return crypto.createHash('md5').update(content).digest('hex');
+        return crypto
+            .createHash('md5')
+            .update(content)
+            .update(this.parserService.getCacheVersion())
+            .digest('hex');
     }
 
     /**
@@ -566,7 +574,8 @@ export class IntelligentIndexer {
             const cachePath = path.join(this.cacheDir, 'index.json');
             const data = {
                 fileHashes: Array.from(this.fileHashes.entries()),
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                parserCacheVersion: this.parserService.getCacheVersion()
             };
             await fs.writeFile(cachePath, JSON.stringify(data, null, 2));
         } catch (error) {
@@ -582,6 +591,11 @@ export class IntelligentIndexer {
             const cachePath = path.join(this.cacheDir, 'index.json');
             const content = await fs.readFile(cachePath, 'utf-8');
             const data = JSON.parse(content);
+
+            if (data.parserCacheVersion !== this.parserService.getCacheVersion()) {
+                this.outputChannel.appendLine('Intelligent index cache parser version changed, starting fresh index');
+                return;
+            }
 
             this.fileHashes = new Map(data.fileHashes);
             this.outputChannel.appendLine(`Loaded cache with ${this.fileHashes.size} files`);

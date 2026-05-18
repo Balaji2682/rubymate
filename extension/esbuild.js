@@ -1,9 +1,55 @@
 const esbuild = require('esbuild');
+const fs = require('fs');
+const path = require('path');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
+const treeSitterAssets = [
+  ['web-tree-sitter', 'web-tree-sitter.wasm'],
+  ['tree-sitter-ruby', 'tree-sitter-ruby.wasm'],
+  ['tree-sitter-html', 'tree-sitter-html.wasm'],
+  ['tree-sitter-javascript', 'tree-sitter-javascript.wasm'],
+  ['tree-sitter-typescript', 'tree-sitter-typescript.wasm'],
+  ['tree-sitter-embedded-template', 'tree-sitter-embedded_template.wasm'],
+];
+
+function packageRoot(packageName) {
+  let current = path.dirname(require.resolve(packageName, {
+    paths: [__dirname],
+  }));
+
+  while (current !== path.dirname(current)) {
+    const manifest = path.join(current, 'package.json');
+    if (fs.existsSync(manifest)) {
+      try {
+        if (JSON.parse(fs.readFileSync(manifest, 'utf8')).name === packageName) {
+          return current;
+        }
+      } catch {
+        // Continue walking upward.
+      }
+    }
+    current = path.dirname(current);
+  }
+
+  throw new Error(`Unable to locate package root for ${packageName}`);
+}
+
+function copyTreeSitterAssets() {
+  const destinationDir = path.join(__dirname, 'out', 'tree-sitter');
+  fs.mkdirSync(destinationDir, { recursive: true });
+
+  for (const [packageName, wasmFile] of treeSitterAssets) {
+    const source = path.join(packageRoot(packageName), wasmFile);
+    const destination = path.join(destinationDir, wasmFile);
+    fs.copyFileSync(source, destination);
+  }
+}
+
 async function main() {
+  copyTreeSitterAssets();
+
   const ctx = await esbuild.context({
     entryPoints: ['src/extension.ts'],
     bundle: true,

@@ -2,7 +2,7 @@
   "name": "rubymate",
   "displayName": "Ruby - Complete Ruby and Rails Extension - (RubyMate)",
   "description": "The ultimate Ruby and Rails extension for VS Code. Features: Solargraph IntelliSense, Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, ERB/Haml/Slim Template Intelligence with path helpers, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "publisher": "BalajiR",
   "icon": "images/icon.png",
   "galleryBanner": {
@@ -101,6 +101,71 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "rubymate.gemExplorer",
+          "name": "Gem Explorer",
+          "when": "workspaceHasGemfile",
+          "icon": "$(package)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "rubymate.gemExplorer",
+        "contents": "No Gemfile.lock found in this workspace.\n[Run bundle install](command:rubymate.gems.bundleInstall)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "rubymate.gems.refresh",
+          "when": "view == rubymate.gemExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "rubymate.gems.checkOutdated",
+          "when": "view == rubymate.gemExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "rubymate.gems.bundleAudit",
+          "when": "view == rubymate.gemExplorer"
+        },
+        {
+          "command": "rubymate.gems.bundleInstall",
+          "when": "view == rubymate.gemExplorer"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "rubymate.gems.openRubyGems",
+          "when": "view == rubymate.gemExplorer && viewItem =~ /^gem/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rubymate.gems.openSourceFromTree",
+          "when": "view == rubymate.gemExplorer && viewItem =~ /^gem/",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rubymate.gems.bundleUpdate",
+          "when": "view == rubymate.gemExplorer && viewItem =~ /^gem/",
+          "group": "actions@1"
+        },
+        {
+          "command": "rubymate.gems.copyName",
+          "when": "view == rubymate.gemExplorer && viewItem =~ /^gem/",
+          "group": "copy@1"
+        },
+        {
+          "command": "rubymate.gems.copyVersion",
+          "when": "view == rubymate.gemExplorer && viewItem =~ /^gem/",
+          "group": "copy@2"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "ruby",
@@ -494,6 +559,66 @@
         "title": "Re-index Stimulus Controllers",
         "category": "Hotwire",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "rubymate.gems.refresh",
+        "title": "Refresh Gems",
+        "category": "Gems",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rubymate.gems.checkOutdated",
+        "title": "Check Outdated Gems",
+        "category": "Gems",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "rubymate.gems.bundleAudit",
+        "title": "Security Audit (bundle audit)",
+        "category": "Gems",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "rubymate.gems.openRubyGems",
+        "title": "Open on RubyGems.org",
+        "category": "Gems",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "rubymate.gems.openSource",
+        "title": "Open Gem Source",
+        "category": "Gems",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "rubymate.gems.openSourceFromTree",
+        "title": "Open Gem Source",
+        "category": "Gems",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "rubymate.gems.bundleUpdate",
+        "title": "Bundle Update",
+        "category": "Gems",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "rubymate.gems.bundleInstall",
+        "title": "Bundle Install",
+        "category": "Gems",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "rubymate.gems.copyName",
+        "title": "Copy Gem Name",
+        "category": "Gems",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "rubymate.gems.copyVersion",
+        "title": "Copy Gem Spec",
+        "category": "Gems",
+        "icon": "$(clippy)"
       }
     ],
     "snippets": [
@@ -561,6 +686,16 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically insert 'end' keyword when creating Ruby blocks (def, class, if, etc.)"
+        },
+        "rubymate.parser.engine": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "tree-sitter",
+            "legacy"
+          ],
+          "default": "auto",
+          "description": "Parser engine for RubyMate code intelligence. Auto uses Tree-sitter first and falls back to the legacy parser if Tree-sitter cannot parse a file."
         },
         "rubymate.hotwire.enabled": {
           "type": "boolean",
@@ -644,7 +779,15 @@
               },
               "rubyVersionManager": {
                 "type": "string",
-                "enum": ["auto", "rbenv", "rvm", "asdf", "mise", "chruby", "none"],
+                "enum": [
+                  "auto",
+                  "rbenv",
+                  "rvm",
+                  "asdf",
+                  "mise",
+                  "chruby",
+                  "none"
+                ],
                 "description": "Ruby version manager to use for PATH setup",
                 "default": "auto"
               }
@@ -788,14 +931,20 @@
     "pretest": "npm run compile && tsc -p ./",
     "test": "node ./out/test/runTest.js",
     "test:unit": "npm run pretest && node ./out/test/runTest.js",
-    "package": "npm run compile:prod && vsce package",
-    "publish": "npm run compile:prod && vsce publish",
+    "package": "npm run compile:prod && vsce package --no-dependencies",
+    "publish": "npm run compile:prod && vsce publish --no-dependencies",
     "analyze": "npm run compile:prod && echo 'Check bundle analysis above'"
   },
   "dependencies": {
     "@vscode/debugadapter": "^1.65.0",
     "@vscode/debugprotocol": "^1.65.0",
-    "vscode-languageclient": "^9.0.1"
+    "tree-sitter-embedded-template": "^0.25.0",
+    "tree-sitter-html": "^0.23.2",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-ruby": "^0.23.1",
+    "tree-sitter-typescript": "^0.23.2",
+    "vscode-languageclient": "^9.0.1",
+    "web-tree-sitter": "^0.26.8"
   },
   "devDependencies": {
     "@types/chai": "^5.2.3",

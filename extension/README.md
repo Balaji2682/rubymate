@@ -18,6 +18,7 @@
 ✅ **Go to Definition** - Navigate to method and class definitions
 ✅ **Find References** - Find all usages of symbols
 ✅ **ActiveRecord Intelligence** - Smart completion for Rails models
+✅ **Gem Explorer** - Visual sidebar to manage gems, check outdated, and security audit
 ✅ **Ruby Syntax Highlighting** - Full Ruby language support
 
 ---
@@ -145,6 +146,21 @@ Professional-grade ERB, Haml, and Slim template editing with complete Rails inte
   <%= render 'admin/dashboard' %>
 <% end %>
 ```
+
+### Gem Explorer
+
+A dedicated sidebar panel for managing your Ruby gems — right inside VS Code:
+
+- **Visual Gem Tree** - All gems from `Gemfile.lock` organized by group (Default, Development, Test, Transitive)
+- **Outdated Detection** - One-click check for outdated gems with upgrade arrows
+- **Security Audit** - Run `bundle audit` to find known vulnerabilities in your dependencies
+- **Quick Actions** - Right-click any gem to:
+  - Open on RubyGems.org
+  - Browse gem source code locally
+  - Run `bundle update` for a single gem
+  - Copy gem name or version spec to clipboard
+- **Auto-Refresh** - Watches `Gemfile` and `Gemfile.lock` for changes
+- **Bundle Commands** - Run `bundle install` and `bundle update` from the sidebar toolbar
 
 ---
 

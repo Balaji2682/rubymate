@@ -1,12 +1,17 @@
 import * as vscode from 'vscode';
 import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { ClassNode, NodeType } from '../indexing/rubyParser';
+import { ParserService } from '../parsing';
 
 /**
  * Provides type hierarchy like IDE's Ctrl+H
  * Shows class inheritance tree (superclasses and subclasses)
  */
 export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
-    constructor(private indexer: AdvancedRubyIndexer) {}
+    constructor(
+        private indexer: AdvancedRubyIndexer,
+        private readonly parserService?: ParserService
+    ) {}
 
     async prepareTypeHierarchy(
         document: vscode.TextDocument,
@@ -54,17 +59,11 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
         const supertypes: vscode.TypeHierarchyItem[] = [];
 
         try {
-            // Read the file to find superclass
             const document = await vscode.workspace.openTextDocument(item.uri);
-            const text = document.getText();
+            const classNode = await this.findClassNode(document, item.name);
 
-            // Find class definition with superclass
-            // Matches: class ClassName < SuperClass
-            const classRegex = new RegExp(`class\\s+${item.name}\\s+<\\s+(\\w+(?:::\\w+)*)`, 'm');
-            const match = classRegex.exec(text);
-
-            if (match && match[1]) {
-                const superclassName = match[1];
+            if (classNode?.superclass) {
+                const superclassName = classNode.superclass;
 
                 // Find the superclass symbol
                 const superclassSymbols = this.indexer.findClasses(superclassName);
@@ -83,12 +82,7 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
                 }
             }
 
-            // Find included modules
-            // Matches: include ModuleName
-            const includeRegex = /include\s+(\w+(?:::\w+)*)/gm;
-            let includeMatch;
-            while ((includeMatch = includeRegex.exec(text)) !== null) {
-                const moduleName = includeMatch[1];
+            for (const moduleName of classNode?.mixins || []) {
                 const moduleSymbols = this.indexer.findSymbols(moduleName, vscode.SymbolKind.Module);
 
                 if (moduleSymbols.length > 0) {
@@ -98,29 +92,6 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
                             vscode.SymbolKind.Module,
                             moduleSymbol.name,
                             'included',
-                            moduleSymbol.location.uri,
-                            moduleSymbol.location.range,
-                            moduleSymbol.location.range
-                        )
-                    );
-                }
-            }
-
-            // Find extended modules
-            // Matches: extend ModuleName
-            const extendRegex = /extend\s+(\w+(?:::\w+)*)/gm;
-            let extendMatch;
-            while ((extendMatch = extendRegex.exec(text)) !== null) {
-                const moduleName = extendMatch[1];
-                const moduleSymbols = this.indexer.findSymbols(moduleName, vscode.SymbolKind.Module);
-
-                if (moduleSymbols.length > 0) {
-                    const moduleSymbol = moduleSymbols[0];
-                    supertypes.push(
-                        new vscode.TypeHierarchyItem(
-                            vscode.SymbolKind.Module,
-                            moduleSymbol.name,
-                            'extended',
                             moduleSymbol.location.uri,
                             moduleSymbol.location.range,
                             moduleSymbol.location.range
@@ -156,11 +127,8 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
 
             try {
                 const document = await vscode.workspace.openTextDocument(classSymbol.location.uri);
-                const text = document.getText();
-
-                // Check if this class inherits from our target class
-                const inheritRegex = new RegExp(`class\\s+${classSymbol.name}\\s+<\\s+${item.name}\\b`, 'm');
-                if (inheritRegex.test(text)) {
+                const classNode = await this.findClassNode(document, classSymbol.name);
+                if (classNode?.superclass === item.name) {
                     subtypes.push(
                         new vscode.TypeHierarchyItem(
                             vscode.SymbolKind.Class,
@@ -179,5 +147,29 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
         }
 
         return subtypes.length > 0 ? subtypes : undefined;
+    }
+
+    private async findClassNode(document: vscode.TextDocument, name: string): Promise<ClassNode | undefined> {
+        if (!this.parserService) {
+            return undefined;
+        }
+
+        const parsed = await this.parserService.parseRuby(document);
+        const stack = [...parsed.value];
+
+        while (stack.length > 0) {
+            const node = stack.shift()!;
+            if (node.type === NodeType.Class) {
+                const classNode = node as ClassNode;
+                const rawName = classNode.metadata.get('rawName') || classNode.name.split('::').pop();
+                if (classNode.name === name || rawName === name) {
+                    return classNode;
+                }
+            }
+
+            stack.push(...node.children);
+        }
+
+        return undefined;
     }
 }

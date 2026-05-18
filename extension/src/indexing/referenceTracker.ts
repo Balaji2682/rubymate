@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SemanticGraphBuilder, Reference, ReferenceType, ReferenceContext } from './semanticGraph';
-import { RubyParser, MethodCall } from './rubyParser';
+import { ASTNode, RubyParser } from './rubyParser';
+import { ParserService } from '../parsing';
 
 /**
  * Reference Tracker - Find all usages of symbols across codebase
@@ -35,7 +36,11 @@ export class ReferenceTracker {
     private graphBuilder: SemanticGraphBuilder;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(graphBuilder: SemanticGraphBuilder, outputChannel: vscode.OutputChannel) {
+    constructor(
+        graphBuilder: SemanticGraphBuilder,
+        outputChannel: vscode.OutputChannel,
+        private readonly parserService?: ParserService
+    ) {
         this.graphBuilder = graphBuilder;
         this.outputChannel = outputChannel;
     }
@@ -109,9 +114,10 @@ export class ReferenceTracker {
     /**
      * Track references in a document
      */
-    async trackReferencesInDocument(document: vscode.TextDocument): Promise<void> {
-        const parser = new RubyParser(document);
-        const ast = parser.parse();
+    async trackReferencesInDocument(document: vscode.TextDocument, parsedAst?: ASTNode[]): Promise<void> {
+        const ast = parsedAst ?? (this.parserService
+            ? (await this.parserService.parseRuby(document)).value
+            : new RubyParser(document).parse());
 
         for (const node of ast) {
             await this.extractReferences(node, document);
