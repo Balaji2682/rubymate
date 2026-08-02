@@ -1,22 +1,24 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 
 export class RubyWorkspaceSymbolProvider implements vscode.WorkspaceSymbolProvider {
-    private symbolIndexer: AdvancedRubyIndexer;
+    private symbolIndexer: CoreRubyIndex;
 
-    constructor(symbolIndexer: AdvancedRubyIndexer) {
+    constructor(symbolIndexer: CoreRubyIndex) {
         this.symbolIndexer = symbolIndexer;
     }
 
-    provideWorkspaceSymbols(
+    async provideWorkspaceSymbols(
         query: string,
         token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.SymbolInformation[]> {
+    ): Promise<vscode.SymbolInformation[]> {
         if (token.isCancellationRequested) {
             return [];
         }
 
-        const symbols = this.symbolIndexer.findSymbols(query);
+        await this.symbolIndexer.indexOpenDocuments(true);
+
+        const symbols = this.symbolIndexer.findWorkspaceSymbols(query);
 
         return symbols.map(symbol => {
             return new vscode.SymbolInformation(

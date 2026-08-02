@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = ["Balaji R"]
   spec.email = ["admin@zengrid.dev"]
 
-  spec.summary = "RubyMate - Unified Ruby LSP add-on combining Solargraph, formatting, and Rails support"
-  spec.description = "A comprehensive Ruby LSP add-on that integrates Solargraph, RuboCop formatting, Rails support, and test running capabilities into a single, seamless VS Code experience"
+  spec.summary = "RubyMate helper library for formatting, Rails file lookup, and test metadata"
+  spec.description = "Small Ruby-side helpers used by RubyMate tooling for RuboCop formatting, Rails file lookup, and test metadata. Code navigation is handled by the VS Code extension's built-in parser and indexer."
   spec.homepage = "https://github.com/your-username/rubymate"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
@@ -22,12 +22,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir.glob("lib/**/*.rb")
   spec.require_paths = ["lib"]
 
-  # Dependencies
-  spec.add_dependency "ruby-lsp", "~> 0.13"
-  spec.add_dependency "solargraph", "~> 0.50"
-
-  # Optional dependencies for enhanced features
-  spec.add_development_dependency "ruby-lsp-rails"
+  # Optional dependencies for helper development and smoke tests.
   spec.add_development_dependency "rubocop", "~> 1.50"
   spec.add_development_dependency "debug", "~> 1.8"
 end

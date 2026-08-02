@@ -2,8 +2,6 @@
 
 require "logger"
 require_relative "rubymate/version"
-require_relative "rubymate/solargraph_bridge"
-require_relative "rubymate/completion_merger"
 require_relative "rubymate/formatter"
 require_relative "rubymate/test_runner"
 require_relative "rubymate/rails_support"

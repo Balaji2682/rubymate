@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer, RubySymbol } from '../advancedIndexer';
+import { CoreRubyIndex, RubySymbol } from '../indexing/coreRubyIndex';
 
 export class NavigationCommands {
-    private symbolIndexer: AdvancedRubyIndexer;
+    private symbolIndexer: CoreRubyIndex;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(symbolIndexer: AdvancedRubyIndexer, outputChannel: vscode.OutputChannel) {
+    constructor(symbolIndexer: CoreRubyIndex, outputChannel: vscode.OutputChannel) {
         this.symbolIndexer = symbolIndexer;
         this.outputChannel = outputChannel;
     }

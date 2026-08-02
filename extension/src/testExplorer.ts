@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { promisify } from 'util';
 import { Debouncer } from './shared';
+import { RubyRuntime, RubyTool } from './runtime/rubyRuntime';
 
 const readFile = promisify(fs.readFile);
 
@@ -15,9 +16,40 @@ interface TestItem {
     framework: 'rspec' | 'minitest';
 }
 
+export interface RubyTestCommand {
+    tool: RubyTool;
+    args: string[];
+}
+
+export function buildRubyTestCommand(
+    filePath: string,
+    label: string,
+    line?: number
+): RubyTestCommand {
+    if (filePath.endsWith('_spec.rb')) {
+        return {
+            tool: 'rspec',
+            args: [line ? `${filePath}:${line}` : filePath]
+        };
+    }
+
+    if (line && label !== path.basename(filePath)) {
+        return {
+            tool: 'ruby',
+            args: [filePath, '--name', label.replace(/ /g, '_')]
+        };
+    }
+
+    return {
+        tool: 'ruby',
+        args: [filePath]
+    };
+}
+
 export class RubyTestExplorer {
     private testController: vscode.TestController;
     private outputChannel: vscode.OutputChannel;
+    private runtime: RubyRuntime;
     private watchers: vscode.FileSystemWatcher[] = [];
     private testFramework: 'rspec' | 'minitest' | 'auto';
 
@@ -25,8 +57,9 @@ export class RubyTestExplorer {
     private fileUpdateDebouncers = new Map<string, Debouncer<void>>();
     private readonly FILE_UPDATE_DEBOUNCE_MS = 300;
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
 
         // Create test controller
         this.testController = vscode.tests.createTestController(
@@ -367,47 +400,28 @@ export class RubyTestExplorer {
             return;
         }
 
-        // Determine if RSpec or Minitest
-        const isRSpec = test.uri.fsPath.endsWith('_spec.rb');
         const filePath = test.uri.fsPath;
-
-        let command: string;
-        if (isRSpec) {
-            // Run specific line if available
-            if (test.range) {
-                command = `bundle exec rspec ${filePath}:${test.range.start.line + 1}`;
-            } else {
-                command = `bundle exec rspec ${filePath}`;
-            }
-        } else {
-            // Minitest
-            if (test.range && test.label !== path.basename(filePath)) {
-                const testName = test.label.replace(/ /g, '_');
-                command = `bundle exec ruby ${filePath} --name ${testName}`;
-            } else {
-                command = `bundle exec ruby ${filePath}`;
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            const exec = require('child_process').exec;
-
-            exec(command, { cwd: workspaceFolder.uri.fsPath }, (error: any, stdout: string, stderr: string) => {
-                const output = stdout + stderr;
-
-                if (error) {
-                    // Parse output for failures
-                    run.failed(test, new vscode.TestMessage(output));
-                    reject(error);
-                } else {
-                    run.passed(test);
-                    resolve();
-                }
-
-                // Append to output channel
-                this.outputChannel.appendLine(output);
-            });
+        const command = buildRubyTestCommand(
+            filePath,
+            test.label,
+            test.range ? test.range.start.line + 1 : undefined
+        );
+        const result = await this.runtime.execRubyTool(command.tool, command.args, {
+            cwd: workspaceFolder.uri.fsPath,
+            timeout: 120000,
+            useBundler: 'auto',
+            allowNonZeroExit: true,
+            logPrefix: 'test'
         });
+
+        const output = result.stdout + result.stderr;
+        this.outputChannel.appendLine(output);
+
+        if (result.exitCode === 0) {
+            run.passed(test);
+        } else {
+            run.failed(test, new vscode.TestMessage(output));
+        }
     }
 
     private async debugTest(test: vscode.TestItem): Promise<void> {

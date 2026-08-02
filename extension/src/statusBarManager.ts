@@ -8,6 +8,8 @@ export enum ExtensionState {
     Initializing = 'initializing',
     Ready = 'ready',
     Indexing = 'indexing',
+    Degraded = 'degraded',
+    Failed = 'failed',
     Error = 'error',
     Disabled = 'disabled'
 }
@@ -30,6 +32,8 @@ export class StatusBarManager {
         [ExtensionState.Initializing]: '$(loading~spin)',
         [ExtensionState.Ready]: '$(ruby)',
         [ExtensionState.Indexing]: '$(sync~spin)',
+        [ExtensionState.Degraded]: '$(warning)',
+        [ExtensionState.Failed]: '$(error)',
         [ExtensionState.Error]: '$(warning)',
         [ExtensionState.Disabled]: '$(circle-slash)'
     };
@@ -39,6 +43,8 @@ export class StatusBarManager {
         [ExtensionState.Initializing]: undefined,
         [ExtensionState.Ready]: undefined,
         [ExtensionState.Indexing]: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        [ExtensionState.Degraded]: new vscode.ThemeColor('statusBarItem.warningBackground'),
+        [ExtensionState.Failed]: new vscode.ThemeColor('statusBarItem.errorBackground'),
         [ExtensionState.Error]: new vscode.ThemeColor('statusBarItem.errorBackground'),
         [ExtensionState.Disabled]: undefined
     };
@@ -48,6 +54,8 @@ export class StatusBarManager {
         [ExtensionState.Initializing]: 'RubyMate is initializing...',
         [ExtensionState.Ready]: 'RubyMate is ready - Click for commands',
         [ExtensionState.Indexing]: 'RubyMate is indexing workspace...',
+        [ExtensionState.Degraded]: 'RubyMate parser/index is degraded - Click for details',
+        [ExtensionState.Failed]: 'RubyMate indexing failed - Click for details',
         [ExtensionState.Error]: 'RubyMate encountered an error - Click for details',
         [ExtensionState.Disabled]: 'RubyMate is disabled'
     };
@@ -106,6 +114,14 @@ export class StatusBarManager {
      */
     setError(message?: string): void {
         this.updateStatusBar(ExtensionState.Error, message || 'Error');
+    }
+
+    setDegraded(message?: string): void {
+        this.updateStatusBar(ExtensionState.Degraded, message || 'Degraded');
+    }
+
+    setFailed(message?: string): void {
+        this.updateStatusBar(ExtensionState.Failed, message || 'Failed');
     }
 
     /**

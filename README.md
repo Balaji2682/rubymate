@@ -5,16 +5,15 @@
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/BalajiR.rubymate?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 [![License](https://img.shields.io/github/license/Balaji2682/rubymate?style=flat-square)](https://github.com/Balaji2682/rubymate/blob/main/LICENSE)
 
-**The all-in-one Ruby and Rails extension for VS Code.** Combines the power of Ruby LSP, Solargraph, intelligent debugging, Rails support, and test exploration into a single, cohesive experience. Brings Advanced/Professional IDE-style productivity to VS Code.
+**The all-in-one Ruby and Rails extension for VS Code.** RubyMate uses its own parser and symbol indexer for navigation, outline, references, Rails conventions, debugging, Rails support, and test exploration in a single extension.
 
 > **📸 Visual Guide Coming Soon**: We're adding screenshots and animated GIFs to showcase features in action. Want to contribute? See [Contributing Guidelines](CONTRIBUTING.md).
 
 ## Features
 
 ### Intelligent Code Completion
-- **Solargraph Integration**: Powerful autocomplete with YARD documentation support
-- **Custom Indexing**: Fast, intelligent symbol indexing for large codebases
-- **YARD Documentation**: Rich documentation on hover
+- **Custom Parser and Indexer**: Fast, intelligent symbol indexing for Ruby and Rails codebases
+- **Hover Documentation**: Method signatures, containers, and indexed documentation when available
 - **Rails-Aware**: ActiveRecord models, associations, route helpers, and more
 - **Context-Aware Suggestions**: Smart completion based on code context
 
@@ -65,11 +64,11 @@
 
 ## Feature Status
 
-This table shows the current testing status of major features. Help us test!
+This table shows the current CI and manual smoke-test status of major features. Help us test!
 
 | Feature | Status | Tested | Known Issues |
 |---------|--------|--------|--------------|
-| **Code Completion** | ✅ | Solargraph + Custom Indexing | - |
+| **Code Completion** | ✅ | Custom parser/indexer | Dynamic Ruby remains conservative |
 | **Go to Definition (F12)** | ✅ | Standard Ruby code | May fail on metaprogramming |
 | **Go to Symbol (Ctrl+T)** | ✅ | Ruby & Rails classes | - |
 | **Symbol Outline (Ctrl+Shift+O)** | ✅ | Classes, methods | - |
@@ -90,8 +89,8 @@ This table shows the current testing status of major features. Help us test!
 | **Real-time Linting** | ✅ | RuboCop integration | - |
 
 ### Legend
-- ✅ **Fully Tested**: Feature works reliably in production
-- ⚠️ **Partially Tested**: Core functionality works, edge cases need testing
+- ✅ **CI/manual smoke tested**: Covered by automated checks, manual smoke testing, or both
+- ⚠️ **Limited testing**: Core functionality works, edge cases need testing
 - 🧪 **Experimental**: New feature, feedback needed
 - ❌ **Known Issues**: Feature has reported problems
 
@@ -104,17 +103,17 @@ This table shows the current testing status of major features. Help us test!
 ### Prerequisites
 1. **Ruby** (2.7+) - Ruby 3.0+ recommended
 2. **Bundler** (2.0+)
-3. **Required gems** - Install manually:
+3. **Recommended gems** - Install manually for formatting, debugging, and tests:
    ```bash
-   gem install solargraph rubocop debug
+   gem install rubocop debug rspec
    ```
 
    Or add to your `Gemfile` (recommended):
    ```ruby
    group :development do
-     gem 'solargraph'
      gem 'rubocop'
      gem 'debug'
+     gem 'rspec'
    end
    ```
    Then run: `bundle install`
@@ -123,7 +122,7 @@ This table shows the current testing status of major features. Help us test!
 1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
 2. Open a Ruby or Rails project
 3. RubyMate activates automatically
-4. Language server starts and indexes your workspace
+4. RubyMate indexes your workspace with its built-in parser/indexer
 
 ### First Steps
 1. **Open a Ruby file** - Autocomplete and navigation work immediately
@@ -145,15 +144,15 @@ This table shows the current testing status of major features. Help us test!
 ### Tested Configurations
 | Ruby | Rails | Status |
 |------|-------|--------|
-| 3.3.x | 7.1.x | ✅ Fully tested |
-| 3.2.x | 7.0.x | ✅ Fully tested |
-| 3.1.x | 6.1.x | ✅ Compatible |
-| 3.0.x | 6.0+ | ✅ Compatible |
+| 3.3.x | 7.1.x | ✅ CI/manual smoke tested |
+| 3.2.x | 7.0.x | ✅ CI/manual smoke tested |
+| 3.1.x | 6.1.x | ✅ Expected compatible |
+| 3.0.x | 6.0+ | ✅ Expected compatible |
 | 2.7.x | 6.0+ | ⚠️ Limited testing |
 
 ### Platform Support
-- **Linux**: ✅ Fully supported
-- **macOS**: ✅ Fully supported
+- **Linux**: ✅ Supported and smoke tested
+- **macOS**: ✅ Supported and smoke tested
 - **Windows**: ✅ Supported (WSL2 recommended)
 
 ---
@@ -362,9 +361,6 @@ This table shows the current testing status of major features. Help us test!
 
 ```json
 {
-  // Enable Solargraph for enhanced completions (recommended)
-  "rubymate.enableSolargraph": true,
-
   // Auto-format on save
   "rubymate.formatOnSave": false,
 
@@ -431,24 +427,23 @@ This table shows the current testing status of major features. Help us test!
 
 ## Troubleshooting
 
-### Language Server Not Starting
+### Parser or Indexer Not Ready
 
-**Symptoms**: No autocomplete, "Language server inactive" in status bar
+**Symptoms**: Missing navigation results, stale symbols, or parser/index degraded status
 
 **Solutions**:
 1. Check Ruby version: `ruby --version` (must be 2.7+)
-2. Verify gems installed: `gem list | grep solargraph`
-3. Check Output panel: View → Output → Select "Solargraph"
-4. Restart language server: Command Palette → "Ruby: Restart Language Server"
+2. Check Output panel: View → Output → Select "RubyMate"
+3. Run Command Palette → "RubyMate: Re-index Workspace"
+4. If Tree-sitter assets fail to load, RubyMate falls back to the legacy parser in `auto` mode
 5. Check logs: `~/.vscode/extensions/BalajiR.rubymate-*/logs/`
 
 ### Autocomplete Not Working
 
 **Possible causes**:
-- Gems not installed → Run: `gem install solargraph`
 - Wrong Ruby version in use → Check: `which ruby`
 - Project not indexed yet → Wait 30-60s after opening large projects
-- Solargraph disabled → Check setting: `rubymate.enableSolargraph`
+- Parser/indexer degraded → Run "RubyMate: Re-index Workspace" and check the RubyMate output
 
 **Fix**: Reload window (Command Palette → "Developer: Reload Window")
 
@@ -492,14 +487,11 @@ This table shows the current testing status of major features. Help us test!
 
 **Causes**:
 - Large project indexing (100k+ lines)
-- Solargraph indexing many gems
+- Large vendor, tmp, or generated directories watched by VS Code
 
 **Optimizations**:
 ```json
 {
-  // Disable Solargraph if not needed (faster, less memory)
-  "rubymate.enableSolargraph": false,
-
   // Exclude large directories from indexing
   "files.watcherExclude": {
     "**/node_modules/**": true,
@@ -552,10 +544,10 @@ This table shows the current testing status of major features. Help us test!
 
 ### vs. Individual Extensions
 
-| Feature | RubyMate | Solargraph + Debug + Extensions |
+| Feature | RubyMate | Multiple Extensions |
 |---------|----------|-------------------------------|
 | Setup | Install one extension | Install 3-4 extensions |
-| Code Intelligence | Custom indexing + Solargraph | Solargraph only |
+| Code Intelligence | Custom parser/indexer | Varies by extension |
 | Rails Support | Deep integration | Basic or none |
 | Test Explorer | Native UI | Terminal only |
 | Navigation | Advanced shortcuts | Basic LSP only |
@@ -619,7 +611,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Acknowledgments
 
 Integrates with:
-- [solargraph](https://github.com/castwide/solargraph) by Fred Snyder
 - [debug](https://github.com/ruby/debug) by Ruby core team
 - [rubocop](https://github.com/rubocop/rubocop) by RuboCop team
 

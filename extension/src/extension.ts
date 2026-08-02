@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-// NOTE: ruby-lsp integration removed due to compatibility issues
-// Using custom indexers and providers instead (advancedIndexer, intelligentIndexer, etc.)
+// RubyMate uses custom indexers and providers instead of a bundled language client.
 // import { startLanguageClient, stopLanguageClient } from './languageClient';
-import { AdvancedRubyIndexer } from './advancedIndexer';
+import { CoreRubyIndex, CoreRubyIndexStatus } from './indexing/coreRubyIndex';
 import { NavigationCommands } from './commands/navigation';
 import { RubyWorkspaceSymbolProvider } from './providers/workspaceSymbolProvider';
 import { RubyDocumentSymbolProvider } from './providers/documentSymbolProvider';
@@ -11,13 +10,13 @@ import { SchemaParser } from './database/schemaParser';
 import { SQLCompletionProvider, ActiveRecordCompletionProvider } from './database/sqlCompletionProvider';
 import { NPlusOneDetector } from './database/n+1Detector';
 import { DatabaseCommands } from './database/databaseCommands';
-import { IntelligentIndexer } from './indexing/intelligentIndexer';
 import { IntelligentNavigationCommands } from './commands/intelligentNavigation';
 import { RubyDefinitionProvider } from './providers/rubyDefinitionProvider';
 import { RubyReferenceProvider } from './providers/referenceProvider';
 import { RubyHoverProvider } from './providers/hoverProvider';
 import { RubyTypeHierarchyProvider } from './providers/typeHierarchyProvider';
 import { RubyCallHierarchyProvider } from './providers/callHierarchyProvider';
+import { RubyRenameProvider } from './providers/renameProvider';
 import { RubyFormattingProvider } from './providers/rubyFormattingProvider';
 import { RubyAutoEndProvider, RubyAutoEndOnEnterProvider } from './providers/rubyAutoEndProvider';
 import { EnhancedTemplateCompletionProvider } from './providers/enhancedTemplateCompletionProvider';
@@ -28,6 +27,7 @@ import { StatusBarManager, ExtensionState } from './statusBarManager';
 import { TelemetryManager } from './telemetryManager';
 import { RatingReminderManager } from './ratingReminder';
 import { Debouncer } from './shared';
+import { formatRuntimeStatus, RubyRuntime } from './runtime/rubyRuntime';
 
 // Gem Explorer
 import { GemExplorerProvider } from './gemExplorer';
@@ -39,6 +39,8 @@ import { StimulusDefinitionProvider } from './hotwire';
 import { HotwireHoverProvider } from './hotwire';
 import { TurboCompletionProvider } from './hotwire';
 import { ParserService } from './parsing';
+import { RubyCompletionProvider } from './completion/rubyCompletionProvider';
+import { loadBundledStubs, loadCompletionStubs } from './completion/stubLoader';
 
 // Lazy-loaded imports (loaded on-demand)
 // import { RailsCommands } from './commands/rails'; // Lazy loaded
@@ -46,7 +48,7 @@ import { ParserService } from './parsing';
 // import { RubyDebugConfigurationProvider, RubyDebugAdapterDescriptorFactory, DebugSessionManager } from './debugAdapter'; // Lazy loaded
 
 let outputChannel: vscode.OutputChannel;
-let symbolIndexer: AdvancedRubyIndexer;
+let symbolIndexer: CoreRubyIndex;
 let navigationCommands: NavigationCommands;
 let railsCommands: any; // Lazy loaded
 let debugSessionManager: any;
@@ -55,6 +57,7 @@ let testExplorer: any; // Lazy loaded
 let railsCommandsLoaded = false;
 let testExplorerLoaded = false;
 let extensionContext: vscode.ExtensionContext; // Store context for lazy loaders
+let rubyRuntime: RubyRuntime;
 
 // Configuration validation
 let configValidator: ConfigValidator;
@@ -73,19 +76,59 @@ let schemaParser: SchemaParser;
 let nPlusOneDetector: NPlusOneDetector;
 let databaseCommands: DatabaseCommands;
 
-// Intelligent indexing
-let intelligentIndexer: IntelligentIndexer;
 let intelligentNavigationCommands: IntelligentNavigationCommands;
 let parserService: ParserService;
 
 // Gem Explorer
 let gemExplorer: GemExplorerProvider;
 
+/**
+ * Keep RubyMate's on-disk cache (.rubymate/) out of VSCode search results and
+ * file watching. Merges the glob into the Workspace-level settings only when it
+ * isn't already present, so we don't churn the user's settings.json.
+ */
+async function ensureRubymateExcluded(): Promise<void> {
+    // Updating Workspace-scoped config requires an open workspace folder.
+    if (!vscode.workspace.workspaceFolders?.length) {
+        return;
+    }
+
+    const glob = '**/.rubymate';
+    const targets: Array<{ section: string; key: string }> = [
+        { section: 'search', key: 'exclude' },
+        { section: 'files', key: 'watcherExclude' }
+    ];
+
+    for (const { section, key } of targets) {
+        try {
+            const config = vscode.workspace.getConfiguration(section);
+            const current = config.get<Record<string, boolean>>(key) ?? {};
+            if (current[glob] === true) {
+                continue; // Already excluded, leave settings untouched.
+            }
+            await config.update(
+                key,
+                { ...current, [glob]: true },
+                vscode.ConfigurationTarget.Workspace
+            );
+            outputChannel.appendLine(`Excluded ${glob} from ${section}.${key}`);
+        } catch (error) {
+            outputChannel.appendLine(
+                `Failed to exclude ${glob} from ${section}.${key}: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     const startTime = Date.now();
     extensionContext = context; // Store for lazy loaders
     outputChannel = vscode.window.createOutputChannel('RubyMate');
     outputChannel.appendLine('RubyMate extension is now active');
+    rubyRuntime = new RubyRuntime(outputChannel);
+
+    // Hide RubyMate's cache folder from search results and file watching.
+    await ensureRubymateExcluded();
 
     // Initialize status bar (shows initializing state)
     statusBarManager = new StatusBarManager(outputChannel);
@@ -107,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // ========== PHASE 0: Configuration Validation (Critical) ==========
     // Validate configuration before initializing other features
-    configValidator = new ConfigValidator(outputChannel);
+    configValidator = new ConfigValidator(outputChannel, rubyRuntime);
     const validationResult = await configValidator.validateAll();
 
     // Show validation errors/warnings to user
@@ -145,17 +188,42 @@ export async function activate(context: vscode.ExtensionContext) {
     // ========== PHASE 1: Core Features (Immediate) ==========
     parserService = new ParserService(context, outputChannel);
     await parserService.initialize();
+    if (parserService.getRuntimeStatus() === 'degraded') {
+        statusBarManager.setDegraded('Parser fallback');
+    } else if (parserService.getRuntimeStatus() === 'failed') {
+        statusBarManager.setFailed('Parser failed');
+    }
 
-    // Initialize advanced symbol indexer with persistent caching
-    symbolIndexer = new AdvancedRubyIndexer(context, outputChannel, parserService);
+    // Initialize the canonical Core Ruby index with persistent caching.
+    symbolIndexer = new CoreRubyIndex(context, outputChannel, parserService, rubyRuntime);
     await symbolIndexer.initialize(); // Load cache from disk
+    context.subscriptions.push(
+        symbolIndexer.onDidChangeStatus(snapshot => {
+            switch (snapshot.state) {
+                case 'indexing':
+                    statusBarManager.setIndexing(snapshot.message || 'Indexing workspace...');
+                    break;
+                case 'degraded':
+                    statusBarManager.setDegraded(
+                        snapshot.degradedFiles > 0
+                            ? `Degraded (${snapshot.degradedFiles})`
+                            : 'Degraded'
+                    );
+                    break;
+                case 'failed':
+                    statusBarManager.setFailed(snapshot.message || 'Index failed');
+                    break;
+                default:
+                    statusBarManager.setReady();
+                    break;
+            }
+        })
+    );
 
     // Initialize navigation commands (lightweight, core feature)
     navigationCommands = new NavigationCommands(symbolIndexer, outputChannel);
 
-    // NOTE: ruby-lsp language server integration is disabled
-    // Using custom providers instead due to ruby-lsp compatibility issues
-    // See: advancedIndexer.ts, intelligentIndexer.ts for custom implementation
+    // See indexing/coreRubyIndex.ts for RubyMate's custom code intelligence.
 
     // Register providers (lightweight)
     registerProviders(context);
@@ -168,9 +236,8 @@ export async function activate(context: vscode.ExtensionContext) {
     // Initialize database features (Rails projects)
     await initializeDatabaseFeatures(context);
 
-    // ========== INTELLIGENT INDEXING ==========
-    // Initialize intelligent semantic indexer
-    await initializeIntelligentIndexing(context);
+    // ========== SEMANTIC NAVIGATION COMMANDS ==========
+    initializeIntelligentNavigationCommands(context);
 
     // ========== GEM EXPLORER ==========
     await initializeGemExplorer(context);
@@ -208,7 +275,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Debug adapter descriptor factory (register ONCE)
-    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel);
+    const debugAdapterFactory = new RubyDebugAdapterDescriptorFactory(outputChannel, rubyRuntime);
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterDescriptorFactory('ruby', debugAdapterFactory)
     );
@@ -242,7 +309,12 @@ export async function activate(context: vscode.ExtensionContext) {
             clearTimeout(timeoutId); // Clear the timeout on success
             outputChannel.appendLine('[INDEXING] ✅ SUCCESS: Indexing completed');
             telemetryManager.endPerformance('workspace-indexing');
-            statusBarManager.setReady();
+            const indexStatus = symbolIndexer.getIndexLifecycleSnapshot();
+            if (indexStatus.state === 'degraded') {
+                statusBarManager.setDegraded(`Degraded (${indexStatus.degradedFiles})`);
+            } else {
+                statusBarManager.setReady();
+            }
             outputChannel.appendLine('[INDEXING] Status bar set to READY');
         })
         .catch(err => {
@@ -250,8 +322,8 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`[INDEXING] ❌ ERROR: ${err.message}`);
             outputChannel.appendLine(`[INDEXING] Error stack: ${err.stack}`);
             telemetryManager.trackError('workspace-indexing-failed', 'indexing', err);
-            statusBarManager.setReady(); // Set to ready even on error to stop spinning
-            outputChannel.appendLine('[INDEXING] Status bar set to READY (after error)');
+            statusBarManager.setFailed('Index failed');
+            outputChannel.appendLine('[INDEXING] Status bar set to FAILED');
             vscode.window.showWarningMessage(
                 `RubyMate: Workspace indexing ${err.message?.includes('timeout') ? 'timed out' : 'failed'}. Some features may be limited.`
             );
@@ -289,7 +361,9 @@ export async function activate(context: vscode.ExtensionContext) {
             debouncer.cancel();
             fileIndexDebouncers.delete(key);
         }
-        // Could also remove from index here
+        symbolIndexer.removeFile(uri, 'deleted').catch(err => {
+            outputChannel.appendLine(`Failed to remove deleted file from index: ${err}`);
+        });
     });
     context.subscriptions.push(watcher);
 
@@ -320,7 +394,7 @@ async function initializeDatabaseFeatures(context: vscode.ExtensionContext): Pro
         nPlusOneDetector = new NPlusOneDetector(schemaParser);
 
         // Initialize database commands
-        databaseCommands = new DatabaseCommands(schemaParser, outputChannel);
+        databaseCommands = new DatabaseCommands(schemaParser, outputChannel, rubyRuntime);
         databaseCommands.registerCommands(context);
 
         // Register SQL completion provider
@@ -373,43 +447,19 @@ async function initializeDatabaseFeatures(context: vscode.ExtensionContext): Pro
     }
 }
 
-// ========== Intelligent Indexing Initialization ==========
+// ========== Semantic Navigation Commands ==========
 
-async function initializeIntelligentIndexing(context: vscode.ExtensionContext): Promise<void> {
-    try {
-        // Initialize intelligent indexer
-        intelligentIndexer = new IntelligentIndexer(context, schemaParser, outputChannel, parserService);
-        await intelligentIndexer.initialize();
-
-        // Initialize navigation commands
-        intelligentNavigationCommands = new IntelligentNavigationCommands(intelligentIndexer, outputChannel);
-        intelligentNavigationCommands.registerCommands(context);
-
-        // Start indexing workspace in background
-        intelligentIndexer.indexWorkspace().catch(err => {
-            outputChannel.appendLine(`Failed to index workspace: ${err}`);
-        });
-
-        // Watch for file changes
-        context.subscriptions.push(
-            vscode.workspace.onDidSaveTextDocument(async doc => {
-                if (doc.languageId === 'ruby') {
-                    await intelligentIndexer.indexFile(doc.uri);
-                }
-            })
-        );
-
-        outputChannel.appendLine('Intelligent indexing initialized');
-    } catch (error) {
-        outputChannel.appendLine(`Intelligent indexing not available: ${error}`);
-    }
+function initializeIntelligentNavigationCommands(context: vscode.ExtensionContext): void {
+    intelligentNavigationCommands = new IntelligentNavigationCommands(symbolIndexer, outputChannel);
+    intelligentNavigationCommands.registerCommands(context);
+    outputChannel.appendLine('Semantic navigation commands registered through CoreRubyIndex');
 }
 
 // ========== Gem Explorer Initialization ==========
 
 async function initializeGemExplorer(context: vscode.ExtensionContext): Promise<void> {
     try {
-        gemExplorer = new GemExplorerProvider(outputChannel);
+        gemExplorer = new GemExplorerProvider(outputChannel, rubyRuntime);
         await gemExplorer.initialize();
 
         // Register tree view
@@ -505,16 +555,7 @@ export async function deactivate() {
             }
         }
 
-        if (intelligentIndexer) {
-            try {
-                intelligentIndexer.dispose();
-            } catch (error) {
-                outputChannel?.appendLine(`Error disposing intelligentIndexer: ${error}`);
-            }
-        }
-
-        // NOTE: Language client integration disabled (ruby-lsp compatibility issues)
-        // No need to stop language client
+        // No bundled language client is running.
 
         // Dispose output channel last
         if (outputChannel) {
@@ -535,7 +576,7 @@ async function loadRailsCommandsAsync(context: vscode.ExtensionContext): Promise
 
     outputChannel.appendLine('Loading Rails commands...');
     const { RailsCommands } = await import('./commands/rails');
-    railsCommands = new RailsCommands(outputChannel);
+    railsCommands = new RailsCommands(outputChannel, rubyRuntime);
     railsCommands.registerCommands(context);
     railsCommandsLoaded = true;
     outputChannel.appendLine('Rails commands loaded');
@@ -548,7 +589,7 @@ async function ensureTestExplorerLoaded(context: vscode.ExtensionContext): Promi
 
     outputChannel.appendLine('Loading test explorer...');
     const { RubyTestExplorer } = await import('./testExplorer');
-    testExplorer = new RubyTestExplorer(outputChannel);
+    testExplorer = new RubyTestExplorer(outputChannel, rubyRuntime);
     context.subscriptions.push(testExplorer);
     testExplorerLoaded = true;
     outputChannel.appendLine('Test explorer loaded');
@@ -628,8 +669,14 @@ function registerProviders(context: vscode.ExtensionContext) {
         vscode.languages.registerCallHierarchyProvider(rubySelector, callHierarchyProvider)
     );
 
+    // Rename Refactoring (like IDE's Shift+F6)
+    const renameProvider = new RubyRenameProvider(symbolIndexer, parserService);
+    context.subscriptions.push(
+        vscode.languages.registerRenameProvider(rubySelector, renameProvider)
+    );
+
     // Formatting provider (RuboCop)
-    const formattingProvider = new RubyFormattingProvider(outputChannel);
+    const formattingProvider = new RubyFormattingProvider(outputChannel, rubyRuntime);
     context.subscriptions.push(
         vscode.languages.registerDocumentFormattingEditProvider(rubySelector, formattingProvider)
     );
@@ -646,6 +693,39 @@ function registerProviders(context: vscode.ExtensionContext) {
             '\n', ' ' // Trigger on newline and space
         )
     );
+
+    // ========== RUBY COMPLETION (semantic, call-graph ranked) ==========
+    // General autocompletion: locals, self methods, receiver members, and
+    // constants, ranked by how the codebase actually uses them. Members of core
+    // and Rails types resolve through the bundled knowledge base, preferring the
+    // signatures already on the user's machine.
+    const completionConfig = vscode.workspace.getConfiguration('rubymate.completion');
+    if (completionConfig.get<boolean>('enabled', true)) {
+        let completionDocs = new Map<string, string>();
+        try {
+            const graph = symbolIndexer.getSemanticGraph();
+            const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            const stubResult = cwd
+                ? loadCompletionStubs(graph, {
+                    cwd,
+                    cacheFile: path.join(extensionContext.globalStorageUri.fsPath, 'completion-stubs.json'),
+                    log: message => outputChannel.appendLine(message)
+                })
+                : loadBundledStubs(graph);
+            completionDocs = stubResult.docs;
+        } catch (error) {
+            outputChannel.appendLine(`Completion knowledge base failed to load: ${error}`);
+        }
+
+        const rubyCompletionProvider = new RubyCompletionProvider(symbolIndexer, completionDocs);
+        context.subscriptions.push(
+            vscode.languages.registerCompletionItemProvider(
+                rubySelector,
+                rubyCompletionProvider,
+                '.', ':', '@', '&' // member, scoped, instance/class var, safe navigation
+            )
+        );
+    }
 
     // ========== TEMPLATE INTELLIGENCE (Professional IDE-level) ==========
     // ERB, Haml, and Slim template support with comprehensive features
@@ -831,6 +911,20 @@ async function indexWorkspace(context: vscode.ExtensionContext) {
     );
 }
 
+function formatCoreIndexStatus(status: CoreRubyIndexStatus): string {
+    return [
+        'RubyMate Core Index',
+        '',
+        `Parser engine: ${status.parserEngine}`,
+        `Indexed files: ${status.indexedFiles}`,
+        `Degraded files: ${status.degradedFiles}`,
+        `Failed files: ${status.failedFiles}`,
+        `Cache version: ${status.cacheVersion}`,
+        `Last index duration: ${status.lastIndexDuration}ms`,
+        `Lifecycle: ${status.lifecycle.state}${status.lifecycle.message ? ` (${status.lifecycle.message})` : ''}`
+    ].join('\n');
+}
+
 function registerCommands(context: vscode.ExtensionContext) {
     // Run single test command
     const runTestCommand = vscode.commands.registerCommand('rubymate.runTest', async () => {
@@ -847,15 +941,17 @@ function registerCommands(context: vscode.ExtensionContext) {
         const currentFile = editor.document.uri.fsPath;
         const currentLine = editor.selection.active.line + 1;
 
-        const terminal = vscode.window.createTerminal('RubyMate Test');
-
         if (testFramework === 'rspec' || currentFile.includes('_spec.rb')) {
-            terminal.sendText(`rspec ${currentFile}:${currentLine}`);
+            await rubyRuntime.runRubyToolInTerminal('rspec', [`${currentFile}:${currentLine}`], {
+                name: 'RubyMate Test',
+                useBundler: 'auto'
+            });
         } else if (testFramework === 'minitest') {
-            terminal.sendText(`ruby ${currentFile} --name /test_/`);
+            await rubyRuntime.runRubyToolInTerminal('ruby', [currentFile, '--name', '/test_/'], {
+                name: 'RubyMate Test',
+                useBundler: 'auto'
+            });
         }
-
-        terminal.show();
     });
 
     // Run test file command
@@ -866,15 +962,18 @@ function registerCommands(context: vscode.ExtensionContext) {
         }
 
         const currentFile = editor.document.uri.fsPath;
-        const terminal = vscode.window.createTerminal('RubyMate Test');
 
         if (currentFile.includes('_spec.rb')) {
-            terminal.sendText(`rspec ${currentFile}`);
+            await rubyRuntime.runRubyToolInTerminal('rspec', [currentFile], {
+                name: 'RubyMate Test',
+                useBundler: 'auto'
+            });
         } else if (currentFile.includes('_test.rb')) {
-            terminal.sendText(`ruby ${currentFile}`);
+            await rubyRuntime.runRubyToolInTerminal('ruby', [currentFile], {
+                name: 'RubyMate Test',
+                useBundler: 'auto'
+            });
         }
-
-        terminal.show();
     });
 
     // Start debugger command
@@ -936,6 +1035,21 @@ function registerCommands(context: vscode.ExtensionContext) {
         if (result.valid && result.warnings.length === 0) {
             vscode.window.showInformationMessage('✓ RubyMate configuration is valid!');
         }
+    });
+
+    // Show runtime status command
+    const showRuntimeStatusCommand = vscode.commands.registerCommand('rubymate.showRuntimeStatus', async () => {
+        const runtimeStatus = await rubyRuntime.getStatus(context.extension.extensionKind);
+        const formatted = [
+            formatRuntimeStatus(runtimeStatus),
+            '',
+            formatCoreIndexStatus(symbolIndexer.getIndexStatus())
+        ].join('\n');
+
+        outputChannel.appendLine('');
+        outputChannel.appendLine(formatted);
+        outputChannel.show();
+        await vscode.window.showInformationMessage(formatted, { modal: true });
     });
 
     // Status bar menu command
@@ -1014,6 +1128,7 @@ function registerCommands(context: vscode.ExtensionContext) {
         reindexCommand,
         showIndexStatsCommand,
         validateConfigCommand,
+        showRuntimeStatusCommand,
         statusBarMenuCommand,
         showTelemetryCommand,
         exportTelemetryCommand,

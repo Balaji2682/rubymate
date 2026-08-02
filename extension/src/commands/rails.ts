@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { escapeShellArg, sanitizeRailsName } from '../utils/shellEscape';
+import { isShellSafe, sanitizeRailsName } from '../utils/shellEscape';
+import { RubyRuntime } from '../runtime/rubyRuntime';
 
 export interface RailsRoute {
     name?: string;
@@ -13,11 +14,13 @@ export interface RailsRoute {
 
 export class RailsCommands {
     private outputChannel: vscode.OutputChannel;
+    private runtime: RubyRuntime;
     private routesCache: RailsRoute[] | null = null;
     private schemaCache: Map<string, any> | null = null;
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
     }
 
     registerCommands(context: vscode.ExtensionContext): void {
@@ -639,12 +642,14 @@ export class RailsCommands {
             placeHolder: 'name:string email:string age:integer'
         });
 
-        const terminal = vscode.window.createTerminal('Rails Generate');
-        terminal.show();
-        // SECURITY: Escape shell arguments to prevent command injection
-        const escapedModelName = escapeShellArg(sanitizedModelName);
-        const escapedAttributes = attributes ? escapeShellArg(attributes) : '';
-        terminal.sendText(`rails generate model ${escapedModelName} ${escapedAttributes}`);
+        const attributeArgs = this.parseRailsArguments(attributes, 'attributes');
+        if (attributeArgs === null) {
+            return;
+        }
+
+        await this.runtime.runRailsInTerminal(['generate', 'model', sanitizedModelName, ...attributeArgs], {
+            name: 'Rails Generate'
+        });
     }
 
     private async generateController(): Promise<void> {
@@ -669,12 +674,14 @@ export class RailsCommands {
             placeHolder: 'index show new create'
         });
 
-        const terminal = vscode.window.createTerminal('Rails Generate');
-        terminal.show();
-        // SECURITY: Escape shell arguments to prevent command injection
-        const escapedControllerName = escapeShellArg(sanitizedControllerName);
-        const escapedActions = actions ? escapeShellArg(actions) : '';
-        terminal.sendText(`rails generate controller ${escapedControllerName} ${escapedActions}`);
+        const actionArgs = this.parseRailsArguments(actions, 'actions');
+        if (actionArgs === null) {
+            return;
+        }
+
+        await this.runtime.runRailsInTerminal(['generate', 'controller', sanitizedControllerName, ...actionArgs], {
+            name: 'Rails Generate'
+        });
     }
 
     private async generateMigration(): Promise<void> {
@@ -694,11 +701,9 @@ export class RailsCommands {
             return;
         }
 
-        const terminal = vscode.window.createTerminal('Rails Generate');
-        terminal.show();
-        // SECURITY: Escape shell argument to prevent command injection
-        const escapedMigrationName = escapeShellArg(sanitizedMigrationName);
-        terminal.sendText(`rails generate migration ${escapedMigrationName}`);
+        await this.runtime.runRailsInTerminal(['generate', 'migration', sanitizedMigrationName], {
+            name: 'Rails Generate'
+        });
     }
 
     private async generateScaffold(): Promise<void> {
@@ -723,18 +728,20 @@ export class RailsCommands {
             placeHolder: 'title:string content:text'
         });
 
-        const terminal = vscode.window.createTerminal('Rails Generate');
-        terminal.show();
-        // SECURITY: Escape shell arguments to prevent command injection
-        const escapedResourceName = escapeShellArg(sanitizedResourceName);
-        const escapedAttributes = attributes ? escapeShellArg(attributes) : '';
-        terminal.sendText(`rails generate scaffold ${escapedResourceName} ${escapedAttributes}`);
+        const attributeArgs = this.parseRailsArguments(attributes, 'attributes');
+        if (attributeArgs === null) {
+            return;
+        }
+
+        await this.runtime.runRailsInTerminal(['generate', 'scaffold', sanitizedResourceName, ...attributeArgs], {
+            name: 'Rails Generate'
+        });
     }
 
     private async openConsole(): Promise<void> {
-        const terminal = vscode.window.createTerminal('Rails Console');
-        terminal.show();
-        terminal.sendText('rails console');
+        await this.runtime.runRailsInTerminal(['console'], {
+            name: 'Rails Console'
+        });
     }
 
     private async showSchema(): Promise<void> {
@@ -801,9 +808,9 @@ export class RailsCommands {
     }
 
     private async runMigrations(): Promise<void> {
-        const terminal = vscode.window.createTerminal('Rails Migrate');
-        terminal.show();
-        terminal.sendText('rails db:migrate');
+        await this.runtime.runRailsInTerminal(['db:migrate'], {
+            name: 'Rails Migrate'
+        });
     }
 
     private async rollbackMigration(): Promise<void> {
@@ -824,10 +831,10 @@ export class RailsCommands {
             return;
         }
 
-        const terminal = vscode.window.createTerminal('Rails Rollback');
-        terminal.show();
         // SECURITY: Use validated integer to prevent command injection
-        terminal.sendText(`rails db:rollback STEP=${stepsNum}`);
+        await this.runtime.runRailsInTerminal(['db:rollback', `STEP=${stepsNum}`], {
+            name: 'Rails Rollback'
+        });
     }
 
     private async goToConcern(): Promise<void> {
@@ -873,6 +880,24 @@ export class RailsCommands {
     }
 
     // Helper methods
+
+    private parseRailsArguments(input: string | undefined, label: string): string[] | null {
+        if (!input || !input.trim()) {
+            return [];
+        }
+
+        const args = input.trim().split(/\s+/);
+        const invalid = args.find(arg => !isShellSafe(arg, /^[a-zA-Z0-9_:.\-/=]+$/));
+
+        if (invalid) {
+            vscode.window.showErrorMessage(
+                `Invalid ${label} value "${invalid}". Use only letters, numbers, underscores, dashes, slashes, dots, colons, and equals signs.`
+            );
+            return null;
+        }
+
+        return args;
+    }
 
     private async parseRoutes(workspacePath: string): Promise<RailsRoute[]> {
         if (this.routesCache) {

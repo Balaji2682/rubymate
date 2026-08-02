@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
-import { IntelligentIndexer } from '../indexing/intelligentIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 
 /**
  * Intelligent Navigation Commands
  */
 
 export class IntelligentNavigationCommands {
-    private indexer: IntelligentIndexer;
+    private indexer: CoreRubyIndex;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(indexer: IntelligentIndexer, outputChannel: vscode.OutputChannel) {
+    constructor(indexer: CoreRubyIndex, outputChannel: vscode.OutputChannel) {
         this.indexer = indexer;
         this.outputChannel = outputChannel;
     }

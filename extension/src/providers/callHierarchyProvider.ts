@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 import { CallGraphIndex, MethodCall } from '../shared/indexes/callGraphIndex';
 import { LRUCache } from '../shared/dataStructures/lruCache';
 import { ParserService } from '../parsing';
+import { getRubyLookupCandidates, getRubyTokenAtPosition } from '../shared/rubyToken';
 
 /**
  * Provides call hierarchy like IDE Ctrl+Alt+H
@@ -19,7 +20,7 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
     private fileCallCache: LRUCache<string, MethodCall[]>;
 
     constructor(
-        private indexer: AdvancedRubyIndexer,
+        private indexer: CoreRubyIndex,
         private readonly parserService?: ParserService
     ) {
         // Performance: 100 files cached, 60 second TTL
@@ -35,18 +36,20 @@ export class RubyCallHierarchyProvider implements vscode.CallHierarchyProvider {
             return undefined;
         }
 
-        const wordRange = document.getWordRangeAtPosition(position);
-        if (!wordRange) {
+        await this.indexer.indexDocument(document, true);
+
+        const rubyToken = getRubyTokenAtPosition(document, position);
+        if (!rubyToken) {
             return undefined;
         }
 
-        const word = document.getText(wordRange);
+        const candidates = getRubyLookupCandidates(rubyToken.text);
 
         // Find methods with this name
-        const symbols = this.indexer.findSymbols(word, vscode.SymbolKind.Method);
+        const symbols = candidates.flatMap(candidate => this.indexer.findSymbols(candidate, vscode.SymbolKind.Method));
         if (symbols.length === 0) {
             // Also try functions
-            const functionSymbols = this.indexer.findSymbols(word, vscode.SymbolKind.Function);
+            const functionSymbols = candidates.flatMap(candidate => this.indexer.findSymbols(candidate, vscode.SymbolKind.Function));
             if (functionSymbols.length === 0) {
                 return undefined;
             }

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Semantic Ruby autocompletion** - Context-aware completion that reads the cursor's grammatical situation and answers each accordingly:
+  - Member completion after `.`/`&.` resolves the receiver's type (locals, constructors, and inference) and offers its full method resolution order, filtered to reachable visibility
+  - Bareword completion competes in-scope locals, `self` methods (including private/protected), and Ruby keywords on one ranked list
+  - Constant, `Namespace::`, `@ivar`, and `@@cvar` completion from the semantic graph
+  - Core and Rails types resolve through a bundled knowledge base that prefers the RBS/RBI signatures already on the user's machine, with a bundled floor fallback
+  - Results are ranked by how the codebase actually uses each method (call-graph usage counts), not just alphabetically, alongside match quality, scope proximity, and type-resolution confidence
+  - Methods with required arguments complete to a call snippet with tab stops
+  - Toggle with `rubymate.completion.enabled`
+- Reliability hardening for RubyMate's built-in parser/indexer pipeline:
+  - Open and visible Ruby documents are re-indexed before navigation/provider lookups
+  - Per-file index status is tracked as `ok`, `fallback`, `parse_error`, `stale`, or `deleted`
+  - Status bar now distinguishes ready, indexing, degraded, and failed index states
+  - References and definitions understand Ruby suffix methods (`?`, `!`, `=`) and qualified constants consistently
 - **Gem Explorer** - Dedicated sidebar panel for Ruby gem management
   - Visual tree view of all gems from `Gemfile.lock`, grouped by Gemfile group
   - Distinguishes direct dependencies from transitive dependencies
@@ -21,10 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - 🚀 **Initial Release** of RubyMate - Ultimate Ruby & Rails IDE
-- 🔍 **Dual Language Server Integration**
-  - Ruby LSP support for modern Ruby features
-  - Solargraph integration for YARD documentation
-  - Intelligent completion merging from both servers
+- 🔍 **RubyMate Code Intelligence**
+  - Built-in Ruby parser/indexer for project symbols
+  - Rails-aware navigation, references, and outline support
+  - Conservative handling for dynamic Ruby and metaprogramming
 - 🧭 **Advanced-Style Navigation**
   - Go to Definition (`Ctrl+B`, `Ctrl+Click`)
   - Go to Class (`Ctrl+N`) with fuzzy search
@@ -69,8 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 40+ Ruby code snippets
   - Rails-specific snippets for common patterns
 - ⚙️ **Configuration**
-  - `rubymate.enableRubyLSP` - Enable/disable Ruby LSP
-  - `rubymate.enableSolargraph` - Enable/disable Solargraph
   - `rubymate.formatOnSave` - Auto-format on save
   - `rubymate.rubyPath` - Custom Ruby executable path
   - `rubymate.enableRailsSupport` - Enable Rails features
@@ -107,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 RubyMate brings a unified, comprehensive Ruby and Rails development experience to VS Code. No more juggling multiple extensions - everything you need is built-in.
 
 **Highlights:**
-- ✨ Combines Ruby LSP + Solargraph for the best completions
+- ✨ Built-in parser/indexer for Ruby and Rails navigation
 - 🎯 Advanced/Professional IDE-style shortcuts work out of the box
 - 🚂 Deep Rails integration with smart navigation
 - 🐛 Full debugging support with official debug gem
@@ -117,7 +128,7 @@ RubyMate brings a unified, comprehensive Ruby and Rails development experience t
 **Installation:**
 ```bash
 # In your project
-gem install ruby-lsp solargraph rubocop debug
+gem install rubocop debug
 
 # Then install RubyMate from VS Code Marketplace
 ```

@@ -2,11 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { promisify } from 'util';
-import * as child_process from 'child_process';
+import { RubyRuntime } from './runtime/rubyRuntime';
 
 const readFileAsync = promisify(fs.readFile);
 const existsAsync = (p: string) => fs.promises.access(p).then(() => true).catch(() => false);
-const execAsync = promisify(child_process.exec);
 
 // ─── Data Types ────────────────────────────────────────────────
 
@@ -52,6 +51,12 @@ class GemTreeItem extends vscode.TreeItem {
         } else {
             this.iconPath = new vscode.ThemeIcon('ruby');
         }
+
+        this.command = {
+            command: 'rubymate.gems.openSource',
+            title: 'Open Gem Source',
+            arguments: [gem]
+        };
     }
 
     private buildTooltip(): vscode.MarkdownString {
@@ -181,8 +186,10 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
     private disposables: vscode.Disposable[] = [];
     private watcher: vscode.FileSystemWatcher | undefined;
     private workspaceRoot: string | undefined;
+    private runtime: RubyRuntime;
 
-    constructor(private outputChannel: vscode.OutputChannel) {
+    constructor(private outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
         this.workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
         if (this.workspaceRoot) {
@@ -317,25 +324,23 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
                 try {
                     // bundle outdated exits non-zero when outdated gems exist,
                     // so we need to handle both success and "expected failure" cases
-                    let output = '';
-                    try {
-                        const { stdout } = await execAsync('bundle outdated --parseable', {
+                    const result = await this.runtime.exec(
+                        'bundle',
+                        ['outdated', '--parseable'],
+                        {
                             cwd: this.workspaceRoot,
                             timeout: 60000,
-                            encoding: 'utf-8'
-                        });
-                        output = stdout;
-                    } catch (execError: any) {
-                        // Exit code 1 = outdated gems found (expected), extract stdout
-                        if (execError.stdout) {
-                            output = execError.stdout;
-                        } else if (execError.stderr?.includes('Could not locate Gemfile')) {
-                            vscode.window.showWarningMessage('No Gemfile found in workspace.');
-                            return;
-                        } else {
-                            throw execError;
+                            allowNonZeroExit: true,
+                            logPrefix: 'bundle outdated'
                         }
+                    );
+
+                    if (result.stderr.includes('Could not locate Gemfile')) {
+                        vscode.window.showWarningMessage('No Gemfile found in workspace.');
+                        return;
                     }
+
+                    const output = result.stdout;
 
                     // Parse output: "gem-name (newest X.Y.Z, installed A.B.C)"
                     const outdatedMap = new Map<string, string>();
@@ -387,15 +392,22 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
             },
             async () => {
                 try {
-                    const { stdout } = await execAsync('bundle audit check --update', {
-                        cwd: this.workspaceRoot,
-                        timeout: 60000,
-                        encoding: 'utf-8'
-                    });
+                    const result = await this.runtime.exec(
+                        'bundle',
+                        ['audit', 'check', '--update'],
+                        {
+                            cwd: this.workspaceRoot,
+                            timeout: 60000,
+                            allowNonZeroExit: true,
+                            logPrefix: 'bundle audit'
+                        }
+                    );
+                    const stdout = result.stdout;
+                    const stderr = result.stderr;
 
-                    if (stdout.includes('No vulnerabilities found')) {
+                    if (result.exitCode === 0 && stdout.includes('No vulnerabilities found')) {
                         vscode.window.showInformationMessage('No known vulnerabilities found.');
-                    } else {
+                    } else if (stdout && (stdout.includes('Vulnerabilities found') || stdout.includes('Advisory:'))) {
                         // Show results in output channel
                         this.outputChannel.appendLine('\n=== Bundle Audit Results ===');
                         this.outputChannel.appendLine(stdout);
@@ -408,6 +420,23 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
                                 this.outputChannel.show();
                             }
                         });
+                    } else if (stderr.includes('command not found') || stderr.includes('Could not find command')) {
+                        vscode.window.showErrorMessage(
+                            'bundle-audit not installed. Run: gem install bundler-audit',
+                            'Install Now'
+                        ).then(choice => {
+                            if (choice === 'Install Now') {
+                                this.runtime.runCommandInTerminal('gem', ['install', 'bundler-audit'], {
+                                    name: 'RubyMate',
+                                    cwd: this.workspaceRoot
+                                });
+                            }
+                        });
+                    } else if (result.exitCode !== 0) {
+                        this.outputChannel.appendLine(`[GEM EXPLORER] bundle audit error: ${stderr || stdout}`);
+                        vscode.window.showErrorMessage('Failed to run security audit.');
+                    } else {
+                        vscode.window.showInformationMessage('No known vulnerabilities found.');
                     }
                 } catch (error: any) {
                     const stderr = error.stderr || '';
@@ -432,9 +461,10 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
                             'Install Now'
                         ).then(choice => {
                             if (choice === 'Install Now') {
-                                const terminal = vscode.window.createTerminal('RubyMate');
-                                terminal.sendText('gem install bundler-audit');
-                                terminal.show();
+                                this.runtime.runCommandInTerminal('gem', ['install', 'bundler-audit'], {
+                                    name: 'RubyMate',
+                                    cwd: this.workspaceRoot
+                                });
                             }
                         });
                     } else {
@@ -456,10 +486,10 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
         }
 
         try {
-            const { stdout } = await execAsync(`bundle info ${gem.name} --path`, {
+            const { stdout } = await this.runtime.exec('bundle', ['info', gem.name, '--path'], {
                 cwd: this.workspaceRoot,
                 timeout: 10000,
-                encoding: 'utf-8'
+                logPrefix: 'bundle info'
             });
 
             const gemPath = stdout.trim();
@@ -501,19 +531,24 @@ export class GemExplorerProvider implements vscode.TreeDataProvider<TreeElement>
     }
 
     async bundleUpdate(gem?: GemInfo): Promise<void> {
-        const terminal = vscode.window.createTerminal('RubyMate');
         if (gem) {
-            terminal.sendText(`bundle update ${gem.name}`);
+            await this.runtime.runBundlerInTerminal(['update', gem.name], {
+                name: 'RubyMate',
+                cwd: this.workspaceRoot
+            });
         } else {
-            terminal.sendText('bundle update');
+            await this.runtime.runBundlerInTerminal(['update'], {
+                name: 'RubyMate',
+                cwd: this.workspaceRoot
+            });
         }
-        terminal.show();
     }
 
     async bundleInstall(): Promise<void> {
-        const terminal = vscode.window.createTerminal('RubyMate');
-        terminal.sendText('bundle install');
-        terminal.show();
+        await this.runtime.runBundlerInTerminal(['install'], {
+            name: 'RubyMate',
+            cwd: this.workspaceRoot
+        });
     }
 
     // ─── Registration ──────────────────────────────────────────

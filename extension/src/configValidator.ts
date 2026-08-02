@@ -1,15 +1,10 @@
 import * as vscode from 'vscode';
-import * as child_process from 'child_process';
-import * as path from 'path';
-import { promisify } from 'util';
 import {
-    getShellOptions,
     detectRubyInstallation,
     getInstallationInstructions,
     clearRubyPathCache
 } from './utils/rubyPathResolver';
-
-const execAsync = promisify(child_process.exec);
+import { RubyRuntime } from './runtime/rubyRuntime';
 
 export interface ValidationResult {
     valid: boolean;
@@ -34,11 +29,13 @@ export interface ValidationWarning {
  */
 export class ConfigValidator {
     private outputChannel: vscode.OutputChannel;
+    private runtime: RubyRuntime;
     private validationCache: Map<string, { timestamp: number; result: boolean }> = new Map();
     private static readonly CACHE_DURATION_MS = 60000; // 1 minute cache
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
     }
 
     /**
@@ -163,15 +160,8 @@ export class ConfigValidator {
         }
 
         try {
-            // Quote the path to handle spaces (platform-appropriate)
-            const quotedPath = process.platform === 'win32'
-                ? `"${rubyPath}"`
-                : `'${rubyPath.replace(/'/g, "'\\''")}'`;
-
-            // Try to execute ruby --version with platform-appropriate shell
-            const { stdout } = await execAsync(`${quotedPath} --version`, {
-                ...getShellOptions(),
-                env: process.env,
+            // Try to execute ruby --version through the shared runtime layer.
+            const { stdout } = await this.runtime.exec(rubyPath, ['--version'], {
                 timeout: 5000 // 5 second timeout
             });
 

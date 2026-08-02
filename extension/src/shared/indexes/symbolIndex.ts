@@ -15,6 +15,7 @@ export interface IndexedSymbol {
     location: vscode.Location;
     containerName?: string;
     detail?: string;
+    definitionConfidence?: 'exact_ast' | 'rails_convention' | 'metaprogramming' | 'fuzzy' | 'fallback';
     /** Fully qualified name (e.g., Module::Class::method) */
     fullyQualifiedName?: string;
 }

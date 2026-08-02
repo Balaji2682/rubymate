@@ -1,4 +1,7 @@
 import * as assert from 'assert';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 suite('Navigation Features Tests', () => {
@@ -36,6 +39,39 @@ user.name`;
         assert.ok(locations, 'Should return definition locations');
 
         await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    test('Go to Definition - Should handle Ruby method suffixes', async function() {
+        this.timeout(5000);
+
+        const content = `class User
+  def rubymate_unique_predicate?
+    true
+  end
+end
+
+user = User.new
+user.rubymate_unique_predicate?`;
+
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rubymate-nav-'));
+        const uri = vscode.Uri.file(path.join(tempDir, 'user.rb'));
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
+        const doc = await vscode.workspace.openTextDocument(uri);
+
+        await vscode.window.showTextDocument(doc);
+
+        const position = new vscode.Position(7, 10);
+        const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+            'vscode.executeDefinitionProvider',
+            doc.uri,
+            position
+        );
+
+        assert.ok(locations && locations.length > 0, 'Should return definition locations');
+        assert.strictEqual(locations[0].range.start.line, 1, 'Should navigate to the method definition');
+
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await fs.rm(tempDir, { recursive: true, force: true });
     });
 
     test('Find References - Should be registered', async function() {

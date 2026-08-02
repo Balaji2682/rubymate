@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 import { ClassNode, NodeType } from '../indexing/rubyParser';
 import { ParserService } from '../parsing';
 import { Result, ok, err, tryAsync } from '../shared/utilities/result';
 import { LRUCache } from '../shared/dataStructures/lruCache';
+import { escapeRegExp, getRubyLookupCandidates, getRubyReceiverAtPosition, getRubyTokenAtPosition } from '../shared/rubyToken';
+import { definitionConfidenceRank } from '../shared/definitionConfidence';
+import { camelize, singularize, underscore } from '../shared/inflections';
 
 /**
  * Error types for definition resolution
@@ -30,7 +33,7 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
     private pathCache: LRUCache<string, vscode.Uri | null>;
 
     constructor(
-        private indexer: AdvancedRubyIndexer,
+        private indexer: CoreRubyIndex,
         private readonly parserService?: ParserService
     ) {
         this.pathCache = new LRUCache<string, vscode.Uri | null>({ maxSize: 200, maxAge: 30000 });
@@ -41,19 +44,12 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         position: vscode.Position,
         token: vscode.CancellationToken
     ): Promise<vscode.Definition | undefined> {
-        const line = document.lineAt(position.line);
-        const lineText = line.text;
-
-        // Get the word at cursor position
-        const wordRange = document.getWordRangeAtPosition(position);
-        if (!wordRange) {
-            // Check for require statements even without word
-            return this.handleRequireStatement(document, position, lineText);
+        if (token.isCancellationRequested) {
+            return undefined;
         }
 
-        const word = document.getText(wordRange);
-
-        // Use RubyMate index-based definition finding
+        const line = document.lineAt(position.line);
+        const lineText = line.text;
 
         // 1. Try require statement first (handles paths in quotes)
         const requireDef = await this.handleRequireStatement(document, position, lineText);
@@ -61,22 +57,26 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
             return requireDef;
         }
 
-        // 2. Try class/module navigation
-        const classDef = await this.findClassDefinition(word);
-        if (classDef) {
-            return classDef;
+        // Keep the active document in sync with the AST-backed symbol index.
+        await this.indexer.indexDocument(document, true);
+
+        const rubyToken = getRubyTokenAtPosition(document, position);
+        if (!rubyToken || token.isCancellationRequested) {
+            return undefined;
         }
 
-        // 3. Try method navigation (including method calls)
-        const methodDef = await this.findMethodDefinition(word, document, position);
-        if (methodDef) {
-            return methodDef;
-        }
+        const receiver = getRubyReceiverAtPosition(document, position, rubyToken.range);
+        const containingClass = await this.findClassContext(document, position);
 
-        // 4. Try constant navigation
-        const constantDef = await this.findConstantDefinition(word);
-        if (constantDef) {
-            return constantDef;
+        const candidates = getRubyLookupCandidates(rubyToken.text);
+        for (const candidate of candidates) {
+            const definitions = await this.indexer.findDefinitions(candidate, { document, position, receiver, containingClass });
+            if (definitions.length === 1) {
+                return definitions[0].location;
+            }
+            if (definitions.length > 1) {
+                return definitions.map(definition => definition.location);
+            }
         }
 
         return undefined;
@@ -158,6 +158,14 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
      * Shows popup if multiple results found (like IDE)
      */
     private async findClassDefinition(word: string): Promise<vscode.Location | vscode.Location[] | undefined> {
+        if (word.includes('::')) {
+            const exactQualifiedClass = this.indexer.findSymbolByFullyQualifiedName(word, vscode.SymbolKind.Class)
+                ?? this.indexer.findSymbolByFullyQualifiedName(word, vscode.SymbolKind.Module);
+            if (exactQualifiedClass) {
+                return exactQualifiedClass.location;
+            }
+        }
+
         // Search for exact class match
         const symbols = this.indexer.findClasses(word);
         const exactMatches = symbols.filter(s => s.name === word);
@@ -172,21 +180,22 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         if (allMatches.length === 0) {
             // No exact matches, try fuzzy
             if (symbols.length > 0) {
-                return symbols[0].location;
+                return this.sortSymbolsForDefinition(symbols, word)[0].location;
             }
             if (moduleSymbols.length > 0) {
-                return moduleSymbols[0].location;
+                return this.sortSymbolsForDefinition(moduleSymbols, word)[0].location;
             }
             return undefined;
         }
 
+        const sortedMatches = this.sortSymbolsForDefinition(allMatches, word);
         if (allMatches.length === 1) {
             // Single match - navigate directly
-            return allMatches[0].location;
+            return sortedMatches[0].location;
         }
 
         // Multiple matches - return all (VS Code will show QuickPick automatically)
-        return allMatches.map(s => s.location);
+        return sortedMatches.map(s => s.location);
     }
 
     /**
@@ -211,21 +220,26 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         // Fallback: search for method globally
-        const symbols = this.indexer.findSymbols(methodName, vscode.SymbolKind.Method);
+        const symbols = [
+            ...this.indexer.findSymbols(methodName, vscode.SymbolKind.Method),
+            ...this.indexer.findSymbols(methodName, vscode.SymbolKind.Function),
+            ...this.indexer.findSymbols(methodName, vscode.SymbolKind.Property)
+        ];
         const exactMatches = symbols.filter(s => s.name === methodName);
 
         if (exactMatches.length === 0) {
             // No exact matches, try first fuzzy
-            return symbols.length > 0 ? symbols[0].location : undefined;
+            return symbols.length > 0 ? this.sortSymbolsForDefinition(symbols, methodName)[0].location : undefined;
         }
 
+        const sortedMatches = this.sortSymbolsForDefinition(exactMatches, methodName);
         if (exactMatches.length === 1) {
             // Single match - navigate directly
-            return exactMatches[0].location;
+            return sortedMatches[0].location;
         }
 
         // Multiple matches - return all (VS Code will show QuickPick automatically)
-        return exactMatches.map(s => s.location);
+        return sortedMatches.map(s => s.location);
     }
 
     /**
@@ -239,7 +253,59 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
             if (exactMatch) {
                 return exactMatch.location;
             }
-            return symbols[0].location;
+            return this.sortSymbolsForDefinition(symbols, word)[0].location;
+        }
+
+        return undefined;
+    }
+
+    private async findRailsConventionDefinition(
+        word: string,
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): Promise<vscode.Location | undefined> {
+        const lineText = document.lineAt(position.line).text;
+        const escapedWord = escapeRegExp(word);
+
+        const associationMatch = lineText.match(new RegExp(`\\b(has_many|has_one|belongs_to|has_and_belongs_to_many)\\s+:${escapedWord}\\b`));
+        if (associationMatch) {
+            const targetModelName = camelize(
+                associationMatch[1] === 'has_many' || associationMatch[1] === 'has_and_belongs_to_many'
+                    ? singularize(word)
+                    : word
+            );
+            const target = await this.findClassDefinition(targetModelName);
+            if (Array.isArray(target)) {
+                return target[0];
+            }
+            if (target) {
+                return target;
+            }
+
+            return this.findRailsFile(document.uri, ['app', 'models', `${underscore(targetModelName)}.rb`]);
+        }
+
+        const renderMatch = lineText.match(new RegExp(`\\brender\\s+(?::${escapedWord}|["']${escapedWord}["'])`));
+        if (renderMatch) {
+            return this.findViewForControllerAction(document.uri, word);
+        }
+
+        const methodDefinitionMatch = lineText.match(new RegExp(`^\\s*def\\s+${escapedWord}\\b`));
+        if (methodDefinitionMatch && this.isRailsControllerFile(document.uri)) {
+            return this.findViewForControllerAction(document.uri, word);
+        }
+
+        if (/^[A-Z]/.test(word)) {
+            const concern = await this.findRailsFile(document.uri, ['app', 'models', 'concerns', `${underscore(word)}.rb`])
+                ?? await this.findRailsFile(document.uri, ['app', 'controllers', 'concerns', `${underscore(word)}.rb`]);
+            if (concern) {
+                return concern;
+            }
+        }
+
+        const railsClassFile = this.railsClassFilePath(word);
+        if (railsClassFile) {
+            return this.findRailsFile(document.uri, railsClassFile);
         }
 
         return undefined;
@@ -284,6 +350,110 @@ export class RubyDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         return undefined;
+    }
+
+    private sortSymbolsForDefinition<T extends { name: string; definitionConfidence?: string; location: vscode.Location }>(
+        symbols: T[],
+        query: string
+    ): T[] {
+        return [...symbols].sort((a, b) => {
+            const confidenceDelta = definitionConfidenceRank(a.definitionConfidence) - definitionConfidenceRank(b.definitionConfidence);
+            if (confidenceDelta !== 0) {
+                return confidenceDelta;
+            }
+
+            const aExact = a.name === query ? 0 : 1;
+            const bExact = b.name === query ? 0 : 1;
+            if (aExact !== bExact) {
+                return aExact - bExact;
+            }
+
+            return a.location.uri.toString().localeCompare(b.location.uri.toString());
+        });
+    }
+
+    private async findRailsFile(currentFileUri: vscode.Uri, relativePath: string[]): Promise<vscode.Location | undefined> {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(currentFileUri) ?? vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return undefined;
+        }
+
+        const targetUri = vscode.Uri.file(path.join(workspaceFolder.uri.fsPath, ...relativePath));
+        try {
+            await vscode.workspace.fs.stat(targetUri);
+            return new vscode.Location(targetUri, new vscode.Position(0, 0));
+        } catch {
+            return undefined;
+        }
+    }
+
+    private async findViewForControllerAction(
+        controllerUri: vscode.Uri,
+        actionName: string
+    ): Promise<vscode.Location | undefined> {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(controllerUri) ?? vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            return undefined;
+        }
+
+        const relativeController = this.relativeControllerPath(workspaceFolder, controllerUri);
+        if (!relativeController) {
+            return undefined;
+        }
+
+        const viewFolder = relativeController
+            .replace(/\\/g, '/')
+            .replace(/_controller\.rb$/, '')
+            .replace(/\.rb$/, '');
+        const viewPattern = new vscode.RelativePattern(
+            workspaceFolder,
+            `app/views/${viewFolder}/${actionName}.{html.erb,html.haml,html.slim,erb,haml,slim}`
+        );
+        const matches = await vscode.workspace.findFiles(viewPattern, '**/node_modules/**', 1);
+        if (matches.length === 0) {
+            return undefined;
+        }
+
+        return new vscode.Location(matches[0], new vscode.Position(0, 0));
+    }
+
+    private railsClassFilePath(className: string): string[] | undefined {
+        const fileName = `${underscore(className)}.rb`;
+        if (className.endsWith('Controller')) {
+            return ['app', 'controllers', fileName];
+        }
+        if (className.endsWith('Helper')) {
+            return ['app', 'helpers', fileName];
+        }
+        if (className.endsWith('Job')) {
+            return ['app', 'jobs', fileName];
+        }
+        if (className.endsWith('Mailer')) {
+            return ['app', 'mailers', fileName];
+        }
+
+        return undefined;
+    }
+
+    private isRailsControllerFile(uri: vscode.Uri): boolean {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri) ?? vscode.workspace.workspaceFolders?.[0];
+        return workspaceFolder ? this.relativeControllerPath(workspaceFolder, uri) !== undefined : false;
+    }
+
+    private relativeControllerPath(
+        workspaceFolder: vscode.WorkspaceFolder,
+        uri: vscode.Uri
+    ): string | undefined {
+        const relativeController = path.relative(
+            path.join(workspaceFolder.uri.fsPath, 'app', 'controllers'),
+            uri.fsPath
+        );
+
+        if (!relativeController || relativeController.startsWith('..') || path.isAbsolute(relativeController)) {
+            return undefined;
+        }
+
+        return relativeController;
     }
 
     /**

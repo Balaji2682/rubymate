@@ -1,14 +1,17 @@
 import * as vscode from 'vscode';
 import { SchemaParser, Table } from './schemaParser';
 import { escapeRubyHeredoc } from '../utils/shellEscape';
+import { RubyRuntime } from '../runtime/rubyRuntime';
 
 export class DatabaseCommands {
     private schemaParser: SchemaParser;
     private outputChannel: vscode.OutputChannel;
+    private runtime: RubyRuntime;
 
-    constructor(schemaParser: SchemaParser, outputChannel: vscode.OutputChannel) {
+    constructor(schemaParser: SchemaParser, outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.schemaParser = schemaParser;
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
     }
 
     registerCommands(context: vscode.ExtensionContext): void {
@@ -445,9 +448,9 @@ end
      * Open database console
      */
     private openDatabaseConsole(): void {
-        const terminal = vscode.window.createTerminal('Database Console');
-        terminal.sendText('rails dbconsole');
-        terminal.show();
+        this.runtime.runRailsInTerminal(['dbconsole'], {
+            name: 'Database Console'
+        });
     }
 
     /**
@@ -472,14 +475,17 @@ end
         // or executing arbitrary shell commands
         const escapedQuery = escapeRubyHeredoc(query);
 
-        const terminal = vscode.window.createTerminal('SQL Query');
         // Use single quotes to prevent shell interpretation
         // The query is safely embedded in a Ruby heredoc with proper escaping
-        terminal.sendText(`rails runner 'query = <<~SQL
+        this.runtime.runRailsInTerminal([
+            'runner',
+            `query = <<~SQL
 ${escapedQuery}
 SQL
-puts ActiveRecord::Base.connection.execute(query).to_a.inspect'`);
-        terminal.show();
+puts ActiveRecord::Base.connection.execute(query).to_a.inspect`
+        ], {
+            name: 'SQL Query'
+        });
     }
 
     /**

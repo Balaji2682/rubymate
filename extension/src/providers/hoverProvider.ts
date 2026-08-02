@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer, RubySymbol } from '../advancedIndexer';
+import { CoreRubyIndex, RubySymbol } from '../indexing/coreRubyIndex';
 import { LRUCache } from '../shared/dataStructures/lruCache';
 import { getGlobalMetrics } from '../utils/performanceMonitor';
+import { getRubyLookupCandidates, getRubyTokenAtPosition } from '../shared/rubyToken';
 
 /**
  * Provides hover information like IDE Ctrl+Q (Quick Documentation)
@@ -15,7 +16,7 @@ export class RubyHoverProvider implements vscode.HoverProvider {
     private hoverCache: LRUCache<string, vscode.Hover>;
 
     constructor(
-        private indexer: AdvancedRubyIndexer
+        private indexer: CoreRubyIndex
     ) {
         // Performance: 200 entries max, 5 second TTL
         this.hoverCache = new LRUCache<string, vscode.Hover>({ maxSize: 200, maxAge: 5000 });
@@ -42,12 +43,14 @@ export class RubyHoverProvider implements vscode.HoverProvider {
                 return undefined;
             }
 
-            const wordRange = document.getWordRangeAtPosition(position);
-            if (!wordRange) {
+            await this.indexer.indexDocument(document, true);
+
+            const rubyToken = getRubyTokenAtPosition(document, position);
+            if (!rubyToken) {
                 return undefined;
             }
 
-            const word = document.getText(wordRange);
+            const word = rubyToken.text;
 
             // Performance: Check cache first
             const cacheKey = this.getCacheKey(document, position, word);
@@ -60,7 +63,8 @@ export class RubyHoverProvider implements vscode.HoverProvider {
 
             // Build base hover from RubyMate index
             let baseHover: vscode.Hover | null = null;
-            const symbols = this.indexer.findSymbols(word);
+            const symbols = getRubyLookupCandidates(word)
+                .flatMap(candidate => this.indexer.findSymbols(candidate));
 
             if (symbols.length > 0) {
                 // Prioritize by context
@@ -68,7 +72,7 @@ export class RubyHoverProvider implements vscode.HoverProvider {
                 if (symbol) {
                     // Build hover content from RubyMate
                     const hoverContent = this.buildHoverContent(symbol);
-                    baseHover = new vscode.Hover(hoverContent, wordRange);
+                    baseHover = new vscode.Hover(hoverContent, rubyToken.range);
                 }
             }
 

@@ -9,7 +9,7 @@
 
 ## Features
 
-✅ **Ruby IntelliSense** - Smart code completion with Solargraph
+✅ **Ruby IntelliSense** - Smart code navigation and completion from RubyMate's parser/indexer
 ✅ **Visual Debugger** - Debug Ruby and Rails apps with breakpoints (rdbg)
 ✅ **Test Explorer** - Run and debug RSpec & Minitest tests visually
 ✅ **Rails Navigation** - Jump between models, controllers, views, migrations
@@ -28,9 +28,9 @@
 ### Installation
 
 1. Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=BalajiR.rubymate)
-2. Install required Ruby gems:
+2. Install recommended Ruby gems for formatting, debugging, and tests:
    ```bash
-   gem install solargraph rubocop debug
+   gem install rubocop debug rspec
    ```
 3. Open any Ruby or Rails project
 4. Start coding! IntelliSense, debugging, and testing work immediately
@@ -62,6 +62,19 @@ Professional-grade code intelligence built directly into the extension:
 - Symbols, hash keys, delegates, and aliases
 - Block parameters, instance variables, and class variables
 - ActiveRecord associations and Rails-specific patterns
+
+### Semantic Autocompletion
+
+Context-aware completion that understands where the cursor is and answers accordingly:
+
+- **Member completion** (`user.`, `order.line_items&.`) - Resolves the receiver's type and offers its full method resolution order, including inherited and mixin-provided methods, filtered to the visibility you can reach
+- **Bareword completion** - In-scope locals, `self` methods (including private and protected), and Ruby keywords, all competing on one ranked list
+- **Constants, namespaces, and variables** - `Foo`, `Namespace::`, `@ivar`, and `@@cvar` from the project's semantic graph
+- **Core and Rails knowledge** - `String`, `Array`, `ActiveRecord::Base`, and friends resolve through a bundled knowledge base that prefers the RBS/RBI signatures already installed on your machine
+- **Call-graph ranking** - Suggestions are ordered by how your codebase actually uses each method, not just alphabetically, so the calls you make most float to the top
+- **Call snippets** - Methods with required arguments complete to a call with tab stops
+
+Toggle with the `rubymate.completion.enabled` setting.
 
 ### Deep Rails Integration
 
@@ -180,6 +193,17 @@ That's it! No additional configuration needed.
 - **Bundler** (standard with Ruby installations)
 - **Rails** 6.0 or higher (optional, for Rails-specific features)
 
+### Remote Development
+
+RubyMate is a VS Code workspace extension. In WSL, Remote SSH, Dev Containers, and Codespaces, RubyMate runs on the same host as the workspace and executes Ruby tools there.
+
+- **WSL** - Open the folder through Remote - WSL and install/enable RubyMate in WSL.
+- **Remote SSH** - Open the folder through Remote - SSH and install/enable RubyMate on the remote host.
+- **Ruby path** - `rubymate.rubyPath` is interpreted on the workspace host, not on the UI machine.
+- **Virtual workspaces** - Limited/unsupported because RubyMate needs real Ruby tools, debuggers, and workspace files.
+
+Use **RubyMate: Show Runtime Status** to see the active extension host, remote name, workspace root, resolved Ruby/Bundler/RuboCop/Rails/rdbg tools, and CoreRubyIndex parser/index health.
+
 **Optional dependencies** for enhanced features:
 
 ```ruby
@@ -275,18 +299,18 @@ For team consistency, add to `.vscode/settings.json` in your project:
 |--------|----------|-------------------------------|
 | **Installation** | One extension | 3-5+ extensions |
 | **Setup Time** | < 1 minute | 15-30 minutes |
-| **External Dependencies** | None required | Gems + LSP servers |
+| **External Dependencies** | RuboCop/debug gems only for those features | Gems + LSP servers |
 | **Maintenance** | Single update | Multiple extension updates |
 | **Compatibility** | Guaranteed integration | Potential conflicts |
 | **Performance** | Optimized single process | Multiple separate processes |
 | **Support** | Unified | Fragmented across projects |
 
-### RubyMate vs. Language Server Protocol (LSP) Extensions
+### RubyMate vs. Language Server Protocol Extensions
 
 | Feature | RubyMate | LSP-Based Extensions |
 |---------|----------|----------------------|
 | **Installation** | Install and go | Install extension + gem |
-| **Dependencies** | Self-contained | Requires ruby-lsp gem in every project |
+| **Dependencies** | Built-in parser/indexer for navigation | Requires a language server gem in each project |
 | **Navigation** | IDE-quality features | Basic LSP features |
 | **Rails Support** | Built-in deep integration | Limited or via add-ons |
 | **Debugging** | Integrated | Separate extension needed |

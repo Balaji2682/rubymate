@@ -1,20 +1,19 @@
 import * as vscode from 'vscode';
-import * as child_process from 'child_process';
 import * as path from 'path';
-import * as fs from 'fs';
-import { getShellOptions, getRubyPath } from '../utils/rubyPathResolver';
+import { RubyRuntime } from '../runtime/rubyRuntime';
 
 export class RubyFormattingProvider implements vscode.DocumentFormattingEditProvider, vscode.DocumentRangeFormattingEditProvider {
     private outputChannel: vscode.OutputChannel;
-    // Cache which shell method works to avoid repeated detection
-    private bestShellMethod: 'direct' | 'login-shell' | null = null;
+    private runtime: RubyRuntime;
     // Cache RuboCop version for flag compatibility
     private rubocopVersion: string | null = null;
     // Track workspace to invalidate cache when switching workspaces
     private cachedWorkspace: string | null = null;
+    private rubocopAvailable = false;
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
     }
 
     public provideDocumentFormattingEdits(
@@ -47,9 +46,10 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
                     'Install RuboCop'
                 ).then(selection => {
                     if (selection === 'Install RuboCop') {
-                        const terminal = vscode.window.createTerminal('RuboCop Install');
-                        terminal.sendText('gem install rubocop');
-                        terminal.show();
+                        this.runtime.runCommandInTerminal('gem', ['install', 'rubocop'], {
+                            name: 'RuboCop Install',
+                            cwd
+                        });
                     }
                 });
                 return [];
@@ -81,9 +81,10 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
                     'Show Docs'
                 ).then(selection => {
                     if (selection === 'Install RuboCop') {
-                        const terminal = vscode.window.createTerminal('Install RuboCop');
-                        terminal.sendText('gem install rubocop');
-                        terminal.show();
+                        this.runtime.runCommandInTerminal('gem', ['install', 'rubocop'], {
+                            name: 'Install RuboCop',
+                            cwd
+                        });
                     } else if (selection === 'Show Docs') {
                         vscode.env.openExternal(vscode.Uri.parse('https://docs.rubocop.org/rubocop/installation.html'));
                     }
@@ -130,97 +131,37 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
     }
 
     private async checkRuboCopAvailable(cwd: string): Promise<boolean> {
-        return new Promise((resolve) => {
-            // Invalidate cache if workspace changed (prevents stale detection)
-            if (this.cachedWorkspace !== cwd) {
-                if (this.cachedWorkspace !== null) {
-                    this.outputChannel.appendLine(`Workspace changed from ${this.cachedWorkspace} to ${cwd}, invalidating cache`);
-                }
-                this.cachedWorkspace = cwd;
-                this.bestShellMethod = null;
-                this.rubocopVersion = null;
+        // Invalidate cache if workspace changed (prevents stale detection)
+        if (this.cachedWorkspace !== cwd) {
+            if (this.cachedWorkspace !== null) {
+                this.outputChannel.appendLine(`Workspace changed from ${this.cachedWorkspace} to ${cwd}, invalidating cache`);
             }
+            this.cachedWorkspace = cwd;
+            this.rubocopVersion = null;
+            this.rubocopAvailable = false;
+        }
 
-            // Use cached detection result if available (performance optimization)
-            if (this.bestShellMethod !== null) {
-                this.outputChannel.appendLine(`Using cached RuboCop detection: ${this.bestShellMethod}`);
-                resolve(true);
-                return;
-            }
+        if (this.rubocopAvailable) {
+            this.outputChannel.appendLine('Using cached RuboCop detection');
+            return true;
+        }
 
-            const shellOptions = getShellOptions();
-
-            // Strategy: Try multiple approaches to find RuboCop
-            // 1. Try bundle exec (if Gemfile exists)
-            // 2. Try direct command (works for system Ruby, Homebrew, PATH-based installs)
-            // 3. Try with login shell (for version managers: RVM, rbenv, asdf, mise, chruby)
-
-            const tryBundler = () => {
-                // Skip bundler check if no Gemfile exists (saves ~90ms per format)
-                const gemfilePath = path.join(cwd, 'Gemfile');
-                if (!fs.existsSync(gemfilePath)) {
-                    this.outputChannel.appendLine('No Gemfile found, skipping bundler detection');
-                    tryDirect();
-                    return;
-                }
-
-                const execOptions = { cwd, ...shellOptions, timeout: 5000 };
-                child_process.exec('bundle exec rubocop --version', execOptions, (error, stdout) => {
-                    if (!error) {
-                        this.rubocopVersion = this.parseVersion(stdout.trim());
-                        this.outputChannel.appendLine(`RuboCop found via bundler: ${stdout.trim()}`);
-                        this.bestShellMethod = 'direct'; // Bundler works with direct shell
-                        resolve(true);
-                    } else {
-                        tryDirect();
-                    }
-                });
-            };
-
-            const tryDirect = () => {
-                const execOptions = { cwd, ...shellOptions, timeout: 5000 };
-                child_process.exec('rubocop --version', execOptions, (error, stdout) => {
-                    if (!error) {
-                        this.rubocopVersion = this.parseVersion(stdout.trim());
-                        this.outputChannel.appendLine(`RuboCop found (direct): ${stdout.trim()}`);
-                        this.bestShellMethod = 'direct'; // Cache for formatting
-                        resolve(true);
-                    } else {
-                        tryLoginShell();
-                    }
-                });
-            };
-
-            const tryLoginShell = () => {
-                // Only use login shell on Unix-like systems (not Windows)
-                if (process.platform === 'win32') {
-                    this.outputChannel.appendLine('RuboCop not found');
-                    resolve(false);
-                    return;
-                }
-
-                // Try with login shell for version managers
-                const execOptions = {
-                    cwd,
-                    shell: `${shellOptions.shell} -l`,
-                    timeout: 5000
-                };
-                child_process.exec('rubocop --version', execOptions, (error, stdout) => {
-                    if (!error) {
-                        this.rubocopVersion = this.parseVersion(stdout.trim());
-                        this.outputChannel.appendLine(`RuboCop found (via login shell): ${stdout.trim()}`);
-                        this.bestShellMethod = 'login-shell'; // Cache for formatting
-                        resolve(true);
-                    } else {
-                        this.outputChannel.appendLine('RuboCop not found in any location');
-                        resolve(false);
-                    }
-                });
-            };
-
-            // Start with bundler check
-            tryBundler();
-        });
+        try {
+            const result = await this.runtime.execRubyTool('rubocop', ['--version'], {
+                cwd,
+                timeout: 5000,
+                useBundler: 'auto',
+                logPrefix: 'rubocop'
+            });
+            const versionOutput = result.stdout.trim();
+            this.rubocopVersion = this.parseVersion(versionOutput);
+            this.rubocopAvailable = true;
+            this.outputChannel.appendLine(`RuboCop found: ${versionOutput}`);
+            return true;
+        } catch (error) {
+            this.outputChannel.appendLine(`RuboCop not found: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
     }
 
     private async formatWithRuboCop(
@@ -230,130 +171,49 @@ export class RubyFormattingProvider implements vscode.DocumentFormattingEditProv
     ): Promise<string | null> {
         const text = range ? document.getText(range) : document.getText();
 
-        // Use stdin/stdout to format without creating temp files
-        const useBundler = await this.shouldUseBundler(cwd);
-
         // Get correct autocorrect flag based on RuboCop version
         const autocorrectFlag = this.getAutocorrectFlag();
 
-        // Build command string
-        const command = useBundler
-            ? `bundle exec rubocop ${autocorrectFlag} --stdin - --format quiet --stderr`
-            : `rubocop ${autocorrectFlag} --stdin - --format quiet --stderr`;
+        const useBundler = await this.runtime.shouldUseBundler({ cwd });
 
-        const shellOptions = getShellOptions();
-
-        // Now create Promise for spawn operation (no async in constructor)
-        return new Promise((resolve, reject) => {
-
-            // Determine which shell to use based on detection cache
-            // - 'direct': Use normal shell (works for system Ruby, Homebrew, PATH-based installs)
-            // - 'login-shell': Use login shell (for version managers: RVM, rbenv, asdf, mise, chruby)
-            // - null: Not cached yet, default to direct shell (most common case)
-            let shellToUse: string;
-            if (this.bestShellMethod === 'login-shell' && process.platform !== 'win32') {
-                shellToUse = `${shellOptions.shell} -l`;
-                this.outputChannel.appendLine('Using login shell for RuboCop (version manager detected)');
-            } else if (this.bestShellMethod === 'direct' || this.bestShellMethod === null) {
-                // Explicit handling for both 'direct' and null (defensive coding)
-                shellToUse = shellOptions.shell;
-                this.outputChannel.appendLine('Using direct shell for RuboCop (system/PATH Ruby)');
-            } else {
-                // Fallback (should never happen, but defensive)
-                shellToUse = shellOptions.shell;
-                this.outputChannel.appendLine(`Warning: Unknown bestShellMethod '${this.bestShellMethod}', defaulting to direct shell`);
-            }
-
-            const spawnOptions = {
-                cwd,
-                shell: shellToUse
-            };
-
-            const rubocop = child_process.spawn(command, [], spawnOptions);
-
-            // Prevent race condition between timeout, close, and error handlers
-            let processed = false;
-
-            // FIX: Add 30-second timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                if (processed) return;
-                processed = true;
-                rubocop.kill('SIGTERM');
-                this.outputChannel.appendLine('RuboCop process timed out after 30 seconds');
-                resolve(null);
-            }, 30000);
-
-            let stdout = '';
-            let stderr = '';
-            let stdinClosed = false;
-
-            rubocop.stdout.on('data', (data) => {
-                stdout += data.toString();
-            });
-
-            rubocop.stderr.on('data', (data) => {
-                stderr += data.toString();
-            });
-
-            rubocop.on('close', (code) => {
-                if (processed) return;
-                processed = true;
-                clearTimeout(timeout);  // FIX: Clear timeout on completion
-
-                // Check exit code FIRST (not stdout)
-                if (code === 0) {
-                    // Success: return formatted code or original if no changes
-                    if (stderr && !stderr.includes('no offenses detected')) {
-                        this.outputChannel.appendLine(`RuboCop stderr: ${stderr}`);
-                    }
-                    resolve(stdout || text);
-                } else {
-                    // Failure: return null regardless of stdout content
-                    this.outputChannel.appendLine(`RuboCop failed with code ${code}`);
-                    if (stderr) {
-                        this.outputChannel.appendLine(`RuboCop stderr: ${stderr}`);
-                    }
-                    resolve(null);
-                }
-            });
-
-            rubocop.on('error', (error) => {
-                if (processed) return;
-                processed = true;
-                clearTimeout(timeout);  // FIX: Clear timeout on error
-                this.outputChannel.appendLine(`RuboCop spawn error: ${error}`);
-
-                // FIX: Close stdin safely on error
-                if (!stdinClosed && rubocop.stdin.writable) {
-                    rubocop.stdin.end();
-                    stdinClosed = true;
-                }
-
-                reject(error);
-            });
-
-            // Write document content to stdin
-            try {
-                rubocop.stdin.write(text);
-                rubocop.stdin.end();
-                stdinClosed = true;
-            } catch (error) {
-                if (processed) return;
-                processed = true;
-                clearTimeout(timeout);
-                this.outputChannel.appendLine(`Failed to write to stdin: ${error}`);
-                reject(error);
-            }
-        });
-    }
-
-    private async shouldUseBundler(cwd: string): Promise<boolean> {
-        const gemfilePath = path.join(cwd, 'Gemfile');
         try {
-            await fs.promises.access(gemfilePath);
-            return true;
-        } catch {
-            return false;
+            const result = await this.runtime.spawnRubyTool(
+                'rubocop',
+                [autocorrectFlag, '--stdin', '-', '--format', 'quiet', '--stderr'],
+                {
+                    cwd,
+                    input: text,
+                    timeout: 30000,
+                    useBundler,
+                    allowNonZeroExit: true,
+                    logPrefix: 'rubocop'
+                }
+            );
+
+            if (result.timedOut) {
+                this.outputChannel.appendLine('RuboCop process timed out after 30 seconds');
+                return null;
+            }
+
+            if (result.exitCode === 0) {
+                if (result.stderr && !result.stderr.includes('no offenses detected')) {
+                    this.outputChannel.appendLine(`RuboCop stderr: ${result.stderr}`);
+                }
+                return result.stdout || text;
+            }
+
+            this.outputChannel.appendLine(`RuboCop failed with code ${result.exitCode}`);
+            if (result.stderr) {
+                this.outputChannel.appendLine(`RuboCop stderr: ${result.stderr}`);
+            }
+            if (result.stdout) {
+                this.outputChannel.appendLine('RuboCop returned formatted output despite a non-zero exit; applying stdout');
+                return result.stdout;
+            }
+            return null;
+        } catch (error) {
+            this.outputChannel.appendLine(`RuboCop spawn error: ${error}`);
+            throw error;
         }
     }
 

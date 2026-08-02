@@ -106,19 +106,20 @@ rubymate/
 ├── extension/          # TypeScript VS Code extension
 │   ├── src/
 │   │   ├── extension.ts        # Main entry point
-│   │   ├── languageClient.ts   # LSP client
+│   │   ├── advancedIndexer.ts  # Canonical Ruby symbol index
+│   │   ├── parsing/            # ParserService and parser adapters
 │   │   ├── debugAdapter.ts     # Debug adapter
 │   │   ├── testExplorer.ts     # Test explorer
 │   │   ├── commands/           # Command implementations
 │   │   └── providers/          # VS Code providers
 │   ├── snippets/               # Code snippets
 │   └── package.json            # Extension manifest
-├── gem/                # Ruby LSP add-on
+├── gem/                # Ruby helper gem sources
 │   └── lib/
 │       ├── rubymate.rb
 │       └── rubymate/
-│           ├── solargraph_bridge.rb
-│           ├── completion_merger.rb
+│           ├── formatter.rb
+│           ├── rails_support.rb
 │           └── ...
 └── docs/               # Documentation
 ```
@@ -154,11 +155,10 @@ async function navigateToClass(className: string): Promise<void> {
 
 **Example:**
 ```ruby
-# Merges completions from multiple sources
-# @param ruby_lsp_completions [Array<Hash>] Completions from Ruby LSP
-# @param solargraph_completions [Array<Hash>] Completions from Solargraph
-# @return [Array<Hash>] Merged and deduplicated completions
-def merge_completions(ruby_lsp_completions, solargraph_completions)
+# Formats a Ruby file
+# @param file_path [String] File to format
+# @return [Boolean] Whether formatting succeeded
+def format_file(file_path)
   # ...
 end
 ```

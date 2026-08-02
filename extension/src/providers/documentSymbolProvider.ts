@@ -1,22 +1,24 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 
 export class RubyDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
-    private symbolIndexer: AdvancedRubyIndexer;
+    private symbolIndexer: CoreRubyIndex;
 
-    constructor(symbolIndexer: AdvancedRubyIndexer) {
+    constructor(symbolIndexer: CoreRubyIndex) {
         this.symbolIndexer = symbolIndexer;
     }
 
-    provideDocumentSymbols(
+    async provideDocumentSymbols(
         document: vscode.TextDocument,
         token: vscode.CancellationToken
-    ): vscode.ProviderResult<vscode.DocumentSymbol[] | vscode.SymbolInformation[]> {
+    ): Promise<vscode.DocumentSymbol[] | vscode.SymbolInformation[]> {
         if (token.isCancellationRequested || document.languageId !== 'ruby') {
             return [];
         }
 
-        const symbols = this.symbolIndexer.getFileSymbols(document.uri);
+        await this.symbolIndexer.indexDocument(document, true);
+
+        const symbols = this.symbolIndexer.getDocumentSymbols(document.uri);
 
         // Group symbols by container for hierarchical view
         const documentSymbols = new Map<string, vscode.DocumentSymbol>();
@@ -57,7 +59,11 @@ export class RubyDocumentSymbolProvider implements vscode.DocumentSymbolProvider
             } else {
                 // Top-level symbol
                 rootSymbols.push(docSymbol);
-                documentSymbols.set(symbol.name, docSymbol);
+            }
+
+            documentSymbols.set(symbol.name, docSymbol);
+            if (symbol.containerName) {
+                documentSymbols.set(`${symbol.containerName}::${symbol.name}`, docSymbol);
             }
         }
 

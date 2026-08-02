@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { AdvancedRubyIndexer } from '../advancedIndexer';
+import { CoreRubyIndex } from '../indexing/coreRubyIndex';
 import { ClassNode, NodeType } from '../indexing/rubyParser';
 import { ParserService } from '../parsing';
+import { getRubyLookupCandidates, getRubyTokenAtPosition } from '../shared/rubyToken';
 
 /**
  * Provides type hierarchy like IDE's Ctrl+H
@@ -9,7 +10,7 @@ import { ParserService } from '../parsing';
  */
 export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
     constructor(
-        private indexer: AdvancedRubyIndexer,
+        private indexer: CoreRubyIndex,
         private readonly parserService?: ParserService
     ) {}
 
@@ -22,15 +23,17 @@ export class RubyTypeHierarchyProvider implements vscode.TypeHierarchyProvider {
             return undefined;
         }
 
-        const wordRange = document.getWordRangeAtPosition(position);
-        if (!wordRange) {
+        await this.indexer.indexDocument(document, true);
+
+        const rubyToken = getRubyTokenAtPosition(document, position);
+        if (!rubyToken) {
             return undefined;
         }
 
-        const word = document.getText(wordRange);
+        const candidates = getRubyLookupCandidates(rubyToken.text);
 
         // Find the class or module
-        const symbols = this.indexer.findClasses(word);
+        const symbols = candidates.flatMap(candidate => this.indexer.findClasses(candidate));
         if (symbols.length === 0) {
             return undefined;
         }

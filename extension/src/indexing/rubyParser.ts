@@ -28,7 +28,9 @@ export enum NodeType {
     Extend = 'extend',
     Association = 'association',
     Validation = 'validation',
-    Scope = 'scope'
+    Scope = 'scope',
+    GeneratedMethod = 'generated_method',
+    Callback = 'callback'
 }
 
 export interface ClassNode extends ASTNode {
@@ -129,7 +131,7 @@ export class RubyParser {
             }
 
             // Parse method definitions
-            const methodMatch = trimmed.match(/^def\s+(self\.)?([a-z_]\w*[?!]?)/);
+            const methodMatch = trimmed.match(/^def\s+(self\.)?([a-z_][a-z0-9_]*[?!=]?)/);
             if (methodMatch) {
                 currentMethod = this.parseMethod(line, i, methodMatch[2], !!methodMatch[1]);
                 if (currentClass) {
@@ -219,7 +221,7 @@ export class RubyParser {
         );
 
         // Extract parameters
-        const paramsMatch = line.match(/def\s+(?:self\.)?[a-z_]\w*[?!]?\s*\((.*?)\)/);
+        const paramsMatch = line.match(/def\s+(?:self\.)?[a-z_][a-z0-9_]*[?!=]?\s*\((.*?)\)/);
         const parameters = paramsMatch ? this.parseParameters(paramsMatch[1]) : [];
 
         return {
@@ -300,7 +302,7 @@ export class RubyParser {
         const trimmed = line.trim();
 
         // Match method calls: receiver.method(args) or method(args)
-        const callPattern = /([a-z_]\w*)?\.?([a-z_]\w*[?!]?)\s*(?:\(([^)]*)\))?/g;
+        const callPattern = /([a-z_]\w*)?\.?([a-z_][a-z0-9_]*[?!=]?)\s*(?:\(([^)]*)\))?/g;
         let match;
 
         while ((match = callPattern.exec(trimmed)) !== null) {

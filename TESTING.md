@@ -10,7 +10,7 @@ This document provides a comprehensive manual testing checklist for RubyMate fea
 - [ ] Test Rails app (generate if needed): `rails new test-app`
 - [ ] Test gems installed:
   ```bash
-  gem install ruby-lsp solargraph rubocop debug rspec
+  gem install rubocop debug rspec
   ```
 
 ### Test Project Structure
@@ -25,25 +25,15 @@ Create a test Rails app with:
 
 ## Feature Testing Checklist
 
-### 1. Language Server & Code Completion
+### 1. Parser, Indexer & Code Completion
 
-#### Ruby LSP
-- [ ] **Activation**: Open `.rb` file → Check status bar shows "Ruby LSP"
+#### RubyMate Parser/Indexer
+- [ ] **Activation**: Open `.rb` file → Check status bar shows RubyMate ready/indexing/degraded state
 - [ ] **Autocomplete**: Type `Array.` → See methods like `map`, `select`, `each`
 - [ ] **Hover docs**: Hover over `Array` → See documentation
 - [ ] **Diagnostics**: Create syntax error → See red squiggly
-- [ ] **Restart**: Command Palette → "Ruby: Restart Language Server" → Works
-
-#### Solargraph
-- [ ] **Activation**: Check status bar shows "Solargraph"
-- [ ] **YARD docs**: In method with YARD comments → Hover shows docs
-- [ ] **Project indexing**: Large project → Wait 30s → Autocomplete includes project classes
-- [ ] **Gem completion**: Type `Rails.` → See Rails methods (in Rails project)
-
-#### Merged Completions
-- [ ] Type `user.` → See completions from both servers
-- [ ] No duplicate suggestions (or minimal duplicates)
-- [ ] Completions sorted logically (most relevant first)
+- [ ] **Re-index**: Command Palette → "RubyMate: Re-index Workspace" → Status returns ready or degraded with clear output
+- [ ] **Fallback**: Missing Tree-sitter assets in auto mode → Warning shown and legacy parser still returns symbols
 
 **Status**: ✅ Pass / ⚠️ Partial / ❌ Fail
 **Notes**: _____________________________________________
@@ -316,7 +306,7 @@ Create a test Rails app with:
 #### Memory Usage
 - [ ] Open Task Manager / Activity Monitor
 - [ ] Check VS Code memory usage
-- [ ] **Expected**: < 500MB with both servers
+- [ ] **Expected**: < 500MB during normal indexing
 - [ ] **Note**: Varies by project size
 
 #### Large Project (100k+ LOC)
@@ -324,7 +314,7 @@ Create a test Rails app with:
 - [ ] Check indexing time
 - [ ] Autocomplete still responsive
 - [ ] Navigation features work
-- [ ] **Note**: May need to disable Solargraph
+- [ ] **Note**: Exclude generated/vendor directories if indexing is noisy
 
 #### CPU Usage
 - [ ] Monitor CPU during indexing
@@ -339,8 +329,6 @@ Create a test Rails app with:
 ### 8. Configuration
 
 #### Basic Settings
-- [ ] `rubymate.enableRubyLSP: false` → Disables Ruby LSP
-- [ ] `rubymate.enableSolargraph: false` → Disables Solargraph
 - [ ] `rubymate.rubyPath` → Custom Ruby path works
 - [ ] `rubymate.testFramework: "rspec"` → Forces RSpec
 
@@ -382,15 +370,13 @@ Create a test Rails app with:
 ## Edge Cases & Error Handling
 
 ### Missing Dependencies
-- [ ] No Ruby LSP installed → Warning message shown
-- [ ] No Solargraph installed → Warning message shown
 - [ ] No RuboCop installed → Format gracefully fails with message
 - [ ] No debug gem → Debug fails with clear error
 
 ### Corrupt Project
 - [ ] Invalid `Gemfile` → Extension still loads
 - [ ] Missing `config/application.rb` → Rails features disabled
-- [ ] Syntax errors in code → Language server recovers
+- [ ] Syntax errors in code → Parser/index status degrades clearly and recovers after fixing code
 
 ### Large Files
 - [ ] Open 5000+ line file → Autocomplete still works

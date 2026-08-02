@@ -3,7 +3,7 @@ import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as child_process from 'child_process';
-import { getShellOptions } from './utils/rubyPathResolver';
+import { RubyRuntime } from './runtime/rubyRuntime';
 
 export interface DebugConfiguration extends vscode.DebugConfiguration {
     request: 'launch' | 'attach';
@@ -33,36 +33,6 @@ function isRemoteEnvironment(): boolean {
         process.env.CLOUD_SHELL ||
         vscode.env.remoteName
     );
-}
-
-// Detect Ruby version manager in use
-async function detectVersionManager(cwd: string | undefined): Promise<string | null> {
-    const workDir = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!workDir) return null;
-
-    // Check for version manager files
-    const checks = [
-        { file: '.ruby-version', manager: 'rbenv' }, // Also used by chruby
-        { file: '.rvmrc', manager: 'rvm' },
-        { file: '.tool-versions', manager: 'asdf' },
-        { file: '.mise.toml', manager: 'mise' },
-        { file: '.rtx.toml', manager: 'mise' }, // Old mise name
-    ];
-
-    for (const check of checks) {
-        const filePath = path.join(workDir, check.file);
-        if (fs.existsSync(filePath)) {
-            return check.manager;
-        }
-    }
-
-    // Check environment variables
-    if (process.env.RBENV_ROOT || process.env.RBENV_VERSION) return 'rbenv';
-    if (process.env.rvm_path || process.env.MY_RUBY_HOME) return 'rvm';
-    if (process.env.ASDF_DIR) return 'asdf';
-    if (process.env.MISE_DATA_DIR) return 'mise';
-
-    return null;
 }
 
 export class RubyDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
@@ -474,12 +444,14 @@ export class RubyDebugConfigurationProvider implements vscode.DebugConfiguration
 
 export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
     private outputChannel: vscode.OutputChannel;
+    private runtime: RubyRuntime;
     // Track debug processes by session ID to support multiple concurrent sessions
     private debugProcesses = new Map<string, child_process.ChildProcess>();
     private readonly DEFAULT_STARTUP_TIMEOUT = 15000; // 15 seconds default
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, runtime?: RubyRuntime) {
         this.outputChannel = outputChannel;
+        this.runtime = runtime ?? new RubyRuntime(outputChannel);
     }
 
     async createDebugAdapterDescriptor(
@@ -511,13 +483,17 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
             );
 
             if (selection === 'Install Debug Gem') {
-                const terminal = vscode.window.createTerminal('Install Debug Gem');
                 if (config.useBundler) {
-                    terminal.sendText('bundle add debug --group development,test');
+                    this.runtime.runBundlerInTerminal(['add', 'debug', '--group', 'development,test'], {
+                        name: 'Install Debug Gem',
+                        cwd: config.cwd
+                    });
                 } else {
-                    terminal.sendText('gem install debug');
+                    this.runtime.runCommandInTerminal('gem', ['install', 'debug'], {
+                        name: 'Install Debug Gem',
+                        cwd: config.cwd
+                    });
                 }
-                terminal.show();
             } else if (selection === 'Show Instructions') {
                 vscode.env.openExternal(vscode.Uri.parse('https://github.com/ruby/debug#installation'));
             }
@@ -639,7 +615,6 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
 
                 const cwd = config.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
-                // Build environment with version manager support
                 const env = await this.buildEnvironment(config, cwd);
 
                 if (config.useBundler) {
@@ -666,16 +641,11 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
                     this.outputChannel.appendLine('Running in remote/container environment');
                 }
 
-                // Determine shell usage based on platform
-                const useShell = process.platform === 'win32';
-
-                const debugProcess = child_process.spawn(command, args, {
+                const debugProcess = await this.runtime.spawnProcess(command, args, {
                     cwd,
                     env: env as NodeJS.ProcessEnv,
-                    shell: useShell,
                     stdio: ['pipe', 'pipe', 'pipe'],
-                    // On Windows, hide the console window
-                    windowsHide: true
+                    logPrefix: 'rdbg'
                 });
 
                 // Track this process by session ID
@@ -857,39 +827,30 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
     }
 
     private async checkRdbgAvailable(useBundler: boolean | undefined, cwd: string | undefined): Promise<boolean> {
-        return new Promise((resolve) => {
-            const workingDir = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-            let command: string;
-            if (useBundler) {
-                command = 'bundle exec rdbg --version';
-            } else {
-                command = 'rdbg --version';
-            }
-
-            child_process.exec(command, {
-                cwd: workingDir,
+        try {
+            const result = await this.runtime.execRubyTool('rdbg', ['--version'], {
+                cwd,
                 timeout: 10000,
-                ...getShellOptions()
-            }, (error, stdout, stderr) => {
-                if (error) {
-                    this.outputChannel.appendLine(`rdbg check failed: ${error.message}`);
-                    this.outputChannel.appendLine(`stderr: ${stderr}`);
-                    resolve(false);
-                } else {
-                    this.outputChannel.appendLine(`rdbg version: ${stdout.trim()}`);
-                    resolve(true);
-                }
+                useBundler: useBundler ?? 'auto',
+                logPrefix: 'rdbg'
             });
-        });
+            this.outputChannel.appendLine(`rdbg version: ${result.stdout.trim()}`);
+            return true;
+        } catch (error) {
+            const result = (error as { result?: { stderr?: string } }).result;
+            this.outputChannel.appendLine(`rdbg check failed: ${error instanceof Error ? error.message : String(error)}`);
+            if (result?.stderr) {
+                this.outputChannel.appendLine(`stderr: ${result.stderr}`);
+            }
+            return false;
+        }
     }
 
     /**
      * Build environment variables with version manager support
      */
     private async buildEnvironment(config: DebugConfiguration, cwd: string | undefined): Promise<Record<string, string>> {
-        const env: Record<string, string> = {
-            ...process.env as Record<string, string>,
+        const configEnv: Record<string, string> = {
             ...(config.env || {}),
             // Ensure rdbg doesn't try to colorize output
             RUBY_DEBUG_NO_COLOR: '1'
@@ -897,47 +858,11 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
 
         // Handle Spring preloader
         if (config.disableSpring) {
-            env.DISABLE_SPRING = '1';
+            configEnv.DISABLE_SPRING = '1';
         }
 
-        // Handle version manager
-        const versionManager = config.rubyVersionManager === 'auto'
-            ? await detectVersionManager(cwd)
-            : config.rubyVersionManager;
-
-        if (versionManager && versionManager !== 'none') {
-            this.outputChannel.appendLine(`Detected version manager: ${versionManager}`);
-
-            // Ensure PATH includes version manager shims
-            const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-
-            switch (versionManager) {
-                case 'rbenv':
-                    const rbenvRoot = process.env.RBENV_ROOT || path.join(homeDir, '.rbenv');
-                    env.PATH = `${rbenvRoot}/shims:${rbenvRoot}/bin:${env.PATH}`;
-                    break;
-                case 'rvm':
-                    const rvmPath = process.env.rvm_path || path.join(homeDir, '.rvm');
-                    env.PATH = `${rvmPath}/bin:${env.PATH}`;
-                    break;
-                case 'asdf':
-                    const asdfDir = process.env.ASDF_DIR || path.join(homeDir, '.asdf');
-                    env.PATH = `${asdfDir}/shims:${asdfDir}/bin:${env.PATH}`;
-                    break;
-                case 'mise':
-                    const miseDir = process.env.MISE_DATA_DIR || path.join(homeDir, '.local/share/mise');
-                    env.PATH = `${miseDir}/shims:${env.PATH}`;
-                    break;
-                case 'chruby':
-                    // chruby modifies PATH directly, check for RUBY_ROOT
-                    if (process.env.RUBY_ROOT) {
-                        env.PATH = `${process.env.RUBY_ROOT}/bin:${env.PATH}`;
-                    }
-                    break;
-            }
-        }
-
-        return env;
+        const env = await this.runtime.getEnvironment({ cwd, env: configEnv });
+        return env as Record<string, string>;
     }
 
     /**
@@ -955,31 +880,30 @@ export class RubyDebugAdapterDescriptorFactory implements vscode.DebugAdapterDes
     ): void {
         this.outputChannel.appendLine(`Spawning in terminal: ${command} ${args.join(' ')}`);
 
-        const terminal = vscode.window.createTerminal({
+        this.runtime.runCommandInTerminal(command, args, {
             name: `Ruby Debug: ${sessionId.substring(0, 8)}`,
             cwd,
             env
+        }).then(terminal => {
+            // Store a reference (we can't get the actual process, but track the terminal)
+            // Note: Terminal-based debugging has limited process control
+
+            // Wait for the debugger to be ready
+            this.waitForPort(port, timeout)
+                .then(() => {
+                    this.outputChannel.appendLine(`Terminal debugger is listening on port ${port}`);
+                    resolve({ success: true });
+                })
+                .catch((err) => {
+                    this.outputChannel.appendLine(`Failed waiting for terminal debugger: ${err.message}`);
+                    terminal.dispose();
+                    resolve({ success: false, error: `Debugger did not start in time: ${err.message}` });
+                });
+        }).catch(error => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.outputChannel.appendLine(`Failed to create debugger terminal: ${message}`);
+            resolve({ success: false, error: message });
         });
-
-        // Build the command string
-        const fullCommand = `${command} ${args.join(' ')}`;
-        terminal.sendText(fullCommand);
-        terminal.show();
-
-        // Store a reference (we can't get the actual process, but track the terminal)
-        // Note: Terminal-based debugging has limited process control
-
-        // Wait for the debugger to be ready
-        this.waitForPort(port, timeout)
-            .then(() => {
-                this.outputChannel.appendLine(`Terminal debugger is listening on port ${port}`);
-                resolve({ success: true });
-            })
-            .catch((err) => {
-                this.outputChannel.appendLine(`Failed waiting for terminal debugger: ${err.message}`);
-                terminal.dispose();
-                resolve({ success: false, error: `Debugger did not start in time: ${err.message}` });
-            });
     }
 
     /**

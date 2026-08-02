@@ -1,8 +1,8 @@
 {
   "name": "rubymate",
   "displayName": "Ruby - Complete Ruby and Rails Extension - (RubyMate)",
-  "description": "The ultimate Ruby and Rails extension for VS Code. Features: Solargraph IntelliSense, Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, ERB/Haml/Slim Template Intelligence with path helpers, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
-  "version": "0.3.0",
+  "description": "The ultimate Ruby and Rails extension for VS Code. Visual Debugger (rdbg), Test Explorer for RSpec & Minitest, Rails Navigation, ERB/Haml/Slim Template Intelligence with path helpers, RuboCop Auto-format, Go to Definition, Find All References, Code Completion, Syntax Highlighting, and Smart ActiveRecord Intelligence",
+  "version": "0.3.2",
   "publisher": "BalajiR",
   "icon": "images/icon.png",
   "galleryBanner": {
@@ -33,7 +33,6 @@
     "ruby ide",
     "ruby debugger",
     "ruby debug",
-    "solargraph",
     "rspec",
     "minitest",
     "ruby test",
@@ -99,6 +98,15 @@
     "workspaceContains:**/*.haml",
     "workspaceContains:**/*.slim"
   ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "RubyMate runs Ruby tools and debuggers on the workspace host, so it requires a real local, WSL, SSH, container, or Codespaces file system."
+    }
+  },
   "main": "./out/extension.js",
   "contributes": {
     "views": {
@@ -313,6 +321,12 @@
         "title": "Validate Configuration",
         "category": "RubyMate",
         "icon": "$(check)"
+      },
+      {
+        "command": "rubymate.showRuntimeStatus",
+        "title": "Show Runtime Status",
+        "category": "RubyMate",
+        "icon": "$(server-environment)"
       },
       {
         "command": "rubymate.showTelemetry",
@@ -634,11 +648,6 @@
     "configuration": {
       "title": "RubyMate",
       "properties": {
-        "rubymate.enableSolargraph": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Solargraph for enhanced completions"
-        },
         "rubymate.formatOnSave": {
           "type": "boolean",
           "default": false,
@@ -696,6 +705,11 @@
           ],
           "default": "auto",
           "description": "Parser engine for RubyMate code intelligence. Auto uses Tree-sitter first and falls back to the legacy parser if Tree-sitter cannot parse a file."
+        },
+        "rubymate.completion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable RubyMate semantic autocompletion (locals, self methods, receiver members, and constants ranked by how the codebase uses them)"
         },
         "rubymate.hotwire.enabled": {
           "type": "boolean",

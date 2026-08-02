@@ -23,12 +23,24 @@ export interface ParseResult<T> {
     hasErrors?: boolean;
 }
 
+export type ParserRuntimeStatus = 'ready' | 'degraded' | 'failed';
+export type RubySymbolExtractionStatus = 'ok' | 'fallback' | 'parse_error';
+
+export interface RubySymbolExtractionResult {
+    engine: 'tree-sitter' | 'legacy';
+    symbols: RubySymbol[];
+    status: RubySymbolExtractionStatus;
+    hasErrors?: boolean;
+    error?: string;
+}
+
 export interface ParsedMethodCall {
     method: MethodNode;
     call: RubyMethodCall;
 }
 
 const RUBY_PARSE_CACHE_SIZE = 200;
+const PARSER_SERVICE_CACHE_VERSION = 'parser-service:v2';
 
 export class ParserService {
     private readonly runtime: TreeSitterRuntime;
@@ -39,6 +51,8 @@ export class ParserService {
     private readonly rubyParseCache = new LRUCache<string, Promise<ParseResult<ASTNode[]>>>({
         maxSize: RUBY_PARSE_CACHE_SIZE
     });
+    private runtimeStatus: ParserRuntimeStatus = 'ready';
+    private warnedAboutRuntimeFailure = false;
 
     constructor(
         context: vscode.ExtensionContext,
@@ -50,20 +64,32 @@ export class ParserService {
     }
 
     getCacheVersion(): string {
-        return `parser-service:v1;engine=${this.getConfiguredEngine()};${this.runtime.getCacheVersion()}`;
+        return `${PARSER_SERVICE_CACHE_VERSION};engine=${this.getConfiguredEngine()};${this.runtime.getCacheVersion()}`;
+    }
+
+    getRuntimeStatus(): ParserRuntimeStatus {
+        return this.runtimeStatus;
+    }
+
+    getEnginePreference(): ParserEngine {
+        return this.getConfiguredEngine();
     }
 
     async initialize(): Promise<void> {
         if (this.getConfiguredEngine() === 'legacy') {
+            this.runtimeStatus = 'ready';
             return;
         }
 
         try {
             await this.runtime.assertAssetsPresent();
             await this.runtime.ensureReady();
+            this.runtimeStatus = 'ready';
             this.outputChannel.appendLine('[Parser] Tree-sitter runtime initialized');
         } catch (error) {
+            this.runtimeStatus = this.getConfiguredEngine() === 'auto' ? 'degraded' : 'failed';
             this.handleTreeSitterError('initialize Tree-sitter runtime', error);
+            this.showRuntimeWarning(error);
         }
     }
 
@@ -112,10 +138,12 @@ export class ParserService {
         } catch (error) {
             this.handleTreeSitterError(`parse ${document.uri.fsPath}`, error);
             if (engine === 'auto') {
-                return { engine: 'legacy', value: this.legacyAdapter.parse(document) };
+                this.runtimeStatus = 'degraded';
+                return { engine: 'legacy', value: this.legacyAdapter.parse(document), hasErrors: true };
             }
 
-            return { engine: 'tree-sitter', value: [] };
+            this.runtimeStatus = 'failed';
+            return { engine: 'tree-sitter', value: [], hasErrors: true };
         }
     }
 
@@ -128,17 +156,52 @@ export class ParserService {
     }
 
     async extractRubySymbols(document: vscode.TextDocument): Promise<RubySymbol[]> {
+        return (await this.extractRubySymbolResult(document)).symbols;
+    }
+
+    async extractRubySymbolResult(document: vscode.TextDocument): Promise<RubySymbolExtractionResult> {
         const engine = this.getConfiguredEngine();
         if (engine === 'legacy') {
-            return this.legacyAdapter.extractSymbols(document);
+            return {
+                engine: 'legacy',
+                symbols: this.legacyAdapter.extractSymbols(document),
+                status: 'ok'
+            };
         }
 
-        const parsed = await this.parseRuby(document);
-        if (parsed.engine === 'legacy') {
-            return this.legacyAdapter.extractSymbols(document);
-        }
+        try {
+            const parsed = await this.parseRuby(document);
+            if (parsed.engine === 'legacy') {
+                const status = engine === 'auto' && parsed.hasErrors ? 'fallback' : 'ok';
+                const symbols = this.legacyAdapter.extractSymbols(document).map(symbol => ({
+                    ...symbol,
+                    definitionConfidence: status === 'fallback' ? 'fallback' as const : symbol.definitionConfidence
+                }));
 
-        return this.symbolsFromAst(document.uri, parsed.value);
+                return {
+                    engine: 'legacy',
+                    symbols,
+                    status,
+                    hasErrors: parsed.hasErrors
+                };
+            }
+
+            return {
+                engine: 'tree-sitter',
+                symbols: this.symbolsFromAst(document.uri, parsed.value),
+                status: parsed.hasErrors ? 'parse_error' : 'ok',
+                hasErrors: parsed.hasErrors
+            };
+        } catch (error) {
+            this.handleTreeSitterError(`extract symbols from ${document.uri.fsPath}`, error);
+            return {
+                engine: 'tree-sitter',
+                symbols: [],
+                status: 'parse_error',
+                hasErrors: true,
+                error: error instanceof Error ? error.message : String(error)
+            };
+        }
     }
 
     async parseTemplate(document: vscode.TextDocument): Promise<EmbeddedRubyRegion[]> {
@@ -330,7 +393,8 @@ export class ParserService {
                 containerName: effectiveContainer,
                 scope: method.isClassMethod ? 'singleton' : 'instance',
                 detail: method.isClassMethod ? 'class method' : 'instance method',
-                parameters: method.parameters.map(param => param.name)
+                parameters: method.parameters.map(param => param.name),
+                definitionConfidence: 'exact_ast'
             });
         };
 
@@ -342,7 +406,8 @@ export class ParserService {
                     kind: node.type === NodeType.Class ? vscode.SymbolKind.Class : vscode.SymbolKind.Module,
                     location: new vscode.Location(uri, node.range),
                     containerName,
-                    detail: node.type
+                    detail: node.type,
+                    definitionConfidence: 'exact_ast'
                 };
 
                 const classNode = node as ClassNode;
@@ -374,7 +439,8 @@ export class ParserService {
                     kind: vscode.SymbolKind.Constant,
                     location: new vscode.Location(uri, node.range),
                     containerName,
-                    detail: 'constant'
+                    detail: 'constant',
+                    definitionConfidence: 'exact_ast'
                 });
             }
 
@@ -384,7 +450,8 @@ export class ParserService {
                     kind: vscode.SymbolKind.Property,
                     location: new vscode.Location(uri, node.range),
                     containerName,
-                    detail: node.metadata.get('attrType')
+                    detail: node.metadata.get('attrType'),
+                    definitionConfidence: node.metadata.get('definitionConfidence') ?? 'exact_ast'
                 });
             }
 
@@ -394,7 +461,30 @@ export class ParserService {
                     kind: vscode.SymbolKind.Function,
                     location: new vscode.Location(uri, node.range),
                     containerName,
-                    detail: 'scope'
+                    detail: 'scope',
+                    definitionConfidence: node.metadata.get('definitionConfidence') ?? 'metaprogramming'
+                });
+            }
+
+            if (node.type === NodeType.Association) {
+                symbols.push({
+                    name: node.name,
+                    kind: vscode.SymbolKind.Property,
+                    location: new vscode.Location(uri, node.range),
+                    containerName,
+                    detail: node.metadata.get('associationType') ?? 'association',
+                    definitionConfidence: node.metadata.get('definitionConfidence') ?? 'metaprogramming'
+                });
+            }
+
+            if (node.type === NodeType.GeneratedMethod) {
+                symbols.push({
+                    name: node.name,
+                    kind: vscode.SymbolKind.Method,
+                    location: new vscode.Location(uri, node.range),
+                    containerName,
+                    detail: node.metadata.get('generatedBy') ?? 'generated method',
+                    definitionConfidence: node.metadata.get('definitionConfidence') ?? 'metaprogramming'
                 });
             }
 
@@ -418,6 +508,21 @@ export class ParserService {
         if (this.getConfiguredEngine() === 'tree-sitter') {
             this.outputChannel.appendLine('[Parser] rubymate.parser.engine is tree-sitter; legacy fallback is disabled for this parse');
         }
+    }
+
+    private showRuntimeWarning(error: unknown): void {
+        if (this.warnedAboutRuntimeFailure) {
+            return;
+        }
+
+        this.warnedAboutRuntimeFailure = true;
+        const message = error instanceof Error ? error.message : String(error);
+        const fallback = this.getConfiguredEngine() === 'auto'
+            ? 'RubyMate will use the legacy Ruby parser fallback. Some navigation results may be lower confidence.'
+            : 'Legacy fallback is disabled because rubymate.parser.engine is set to tree-sitter.';
+
+        vscode.window.showWarningMessage(`RubyMate parser assets failed to load. ${fallback}`);
+        this.outputChannel.appendLine(`[Parser] User warning shown for runtime failure: ${message}`);
     }
 
     private dedupeRanges(ranges: vscode.Range[]): vscode.Range[] {

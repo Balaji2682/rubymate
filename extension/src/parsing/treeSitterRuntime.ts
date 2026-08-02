@@ -19,6 +19,7 @@ const WASM_FILES: Record<TreeSitterLanguageId | 'runtime', string> = {
 };
 
 const TREE_SITTER_RUNTIME_VERSION = 'web-tree-sitter@0.26.8';
+const TREE_SITTER_LOADER_VERSION = 'wasm-buffer-loader:v1';
 const TREE_SITTER_GRAMMAR_VERSION = [
     'tree-sitter-ruby@0.23.1',
     'tree-sitter-html@0.23.2',
@@ -37,7 +38,7 @@ export class TreeSitterRuntime {
     ) {}
 
     getCacheVersion(): string {
-        return `${TREE_SITTER_RUNTIME_VERSION};${TREE_SITTER_GRAMMAR_VERSION}`;
+        return `${TREE_SITTER_RUNTIME_VERSION};${TREE_SITTER_LOADER_VERSION};${TREE_SITTER_GRAMMAR_VERSION}`;
     }
 
     async parse(languageId: TreeSitterLanguageId, source: string): Promise<TreeSitter.Tree> {
@@ -69,11 +70,7 @@ export class TreeSitterRuntime {
 
     private initialize(): Promise<void> {
         if (!this.initPromise) {
-            this.initPromise = TreeSitter.Parser.init({
-                locateFile: (scriptName: string) => this.assetPath(
-                    scriptName.endsWith('.wasm') ? scriptName : WASM_FILES.runtime
-                )
-            }).catch(error => {
+            this.initPromise = this.initializeRuntime().catch(error => {
                 this.initPromise = undefined;
                 throw error;
             });
@@ -82,13 +79,25 @@ export class TreeSitterRuntime {
         return this.initPromise;
     }
 
+    private async initializeRuntime(): Promise<void> {
+        const wasmBinary = await fs.readFile(this.assetPath(WASM_FILES.runtime));
+
+        await TreeSitter.Parser.init({
+            wasmBinary,
+            locateFile: (scriptName?: string) => this.assetPath(
+                scriptName?.endsWith('.wasm') ? scriptName : WASM_FILES.runtime
+            )
+        } as any);
+    }
+
     private getLanguage(languageId: TreeSitterLanguageId): Promise<TreeSitter.Language> {
         const cached = this.languages.get(languageId);
         if (cached) {
             return cached;
         }
 
-        const loadPromise = TreeSitter.Language.load(this.assetPath(WASM_FILES[languageId]))
+        const loadPromise = fs.readFile(this.assetPath(WASM_FILES[languageId]))
+            .then(bytes => TreeSitter.Language.load(new Uint8Array(bytes)))
             .catch(error => {
                 this.languages.delete(languageId);
                 throw error;

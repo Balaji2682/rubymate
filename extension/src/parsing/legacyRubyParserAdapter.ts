@@ -9,6 +9,7 @@ import {
     Parameter,
     RubyParser
 } from '../indexing/rubyParser';
+import { escapeRegExp, rubyReferencePattern } from '../shared/rubyToken';
 
 export class LegacyRubyParserAdapter {
     parse(document: vscode.TextDocument): ASTNode[] {
@@ -61,7 +62,8 @@ export class LegacyRubyParserAdapter {
                     kind: vscode.SymbolKind.Class,
                     location: new vscode.Location(document.uri, this.lineRange(i, line, 'class')),
                     containerName: currentModule,
-                    detail: superclass ? `class (extends ${superclass})` : 'class'
+                    detail: superclass ? `class (extends ${superclass})` : 'class',
+                    definitionConfidence: 'exact_ast'
                 });
                 continue;
             }
@@ -76,7 +78,8 @@ export class LegacyRubyParserAdapter {
                     name: moduleName,
                     kind: vscode.SymbolKind.Module,
                     location: new vscode.Location(document.uri, this.lineRange(i, line, 'module')),
-                    detail: 'module'
+                    detail: 'module',
+                    definitionConfidence: 'exact_ast'
                 });
                 continue;
             }
@@ -95,7 +98,8 @@ export class LegacyRubyParserAdapter {
                     containerName: currentClass || currentModule,
                     scope: isSelfMethod ? 'singleton' : 'instance',
                     detail: isSelfMethod ? 'class method' : 'instance method',
-                    parameters: parameters.map(p => p.name)
+                    parameters: parameters.map(p => p.name),
+                    definitionConfidence: 'exact_ast'
                 });
                 continue;
             }
@@ -108,7 +112,8 @@ export class LegacyRubyParserAdapter {
                     kind: vscode.SymbolKind.Constant,
                     location: new vscode.Location(document.uri, this.lineRange(i, line, constantName)),
                     containerName: currentClass || currentModule,
-                    detail: 'constant'
+                    detail: 'constant',
+                    definitionConfidence: 'exact_ast'
                 });
                 continue;
             }
@@ -124,10 +129,72 @@ export class LegacyRubyParserAdapter {
                             kind: vscode.SymbolKind.Property,
                             location: new vscode.Location(document.uri, this.lineRange(i, line, attrName)),
                             containerName: currentClass,
-                            detail: attrType
+                            detail: attrType,
+                            definitionConfidence: 'metaprogramming'
                         });
                     }
                 }
+            }
+
+            const associationMatch = trimmed.match(/^(has_many|has_one|belongs_to|has_and_belongs_to_many)\s+:([a-z_][a-z0-9_]*)/);
+            if (associationMatch) {
+                symbols.push({
+                    name: associationMatch[2],
+                    kind: vscode.SymbolKind.Property,
+                    location: new vscode.Location(document.uri, this.lineRange(i, line, associationMatch[2])),
+                    containerName: currentClass,
+                    detail: associationMatch[1],
+                    definitionConfidence: 'metaprogramming'
+                });
+                continue;
+            }
+
+            const scopeMatch = trimmed.match(/^scope\s+:([a-z_][a-z0-9_]*[?!=]?)/);
+            if (scopeMatch) {
+                symbols.push({
+                    name: scopeMatch[1],
+                    kind: vscode.SymbolKind.Function,
+                    location: new vscode.Location(document.uri, this.lineRange(i, line, scopeMatch[1])),
+                    containerName: currentClass,
+                    detail: 'scope',
+                    definitionConfidence: 'metaprogramming'
+                });
+                continue;
+            }
+
+            const delegateMatch = trimmed.match(/^delegate\s+(.+)/);
+            if (delegateMatch) {
+                const delegatedMethods = delegateMatch[1]
+                    .split(',')
+                    .map(part => part.trim().replace(/^:/, '').replace(/^['"]|['"]$/g, ''))
+                    .filter(part => /^[a-z_][a-z0-9_]*[?!=]?$/.test(part));
+
+                for (const methodName of delegatedMethods) {
+                    symbols.push({
+                        name: methodName,
+                        kind: vscode.SymbolKind.Method,
+                        location: new vscode.Location(document.uri, this.lineRange(i, line, methodName)),
+                        containerName: currentClass || currentModule,
+                        detail: 'delegate',
+                        definitionConfidence: 'metaprogramming'
+                    });
+                }
+                continue;
+            }
+
+            const aliasMethodMatch = trimmed.match(/^alias_method\s+:?([a-z_][a-z0-9_]*[?!=]?)\s*,\s*:?([a-z_][a-z0-9_]*[?!=]?)/);
+            const aliasMatch = trimmed.match(/^alias\s+:?([a-z_][a-z0-9_]*[?!=]?)\s+:?([a-z_][a-z0-9_]*[?!=]?)/);
+            const aliasName = aliasMethodMatch?.[1] ?? aliasMatch?.[1];
+            if (aliasName) {
+                symbols.push({
+                    name: aliasName,
+                    kind: vscode.SymbolKind.Method,
+                    location: new vscode.Location(document.uri, this.lineRange(i, line, aliasName)),
+                    containerName: currentClass || currentModule,
+                    detail: 'alias',
+                    definitionConfidence: 'metaprogramming'
+                });
+                continue;
             }
         }
 
@@ -141,20 +208,20 @@ export class LegacyRubyParserAdapter {
     ): vscode.Location[] {
         const locations: vscode.Location[] = [];
         const text = document.getText();
-        const escapedWord = this.escapeRegex(word);
+        const escapedWord = escapeRegExp(word);
         const patterns = [
-            new RegExp(`\\b${escapedWord}\\b`, 'g'),
-            new RegExp(`\\.${escapedWord}\\b`, 'g'),
-            new RegExp(`::${escapedWord}\\b`, 'g'),
-            new RegExp(`@${escapedWord}\\b`, 'g'),
-            new RegExp(`@@${escapedWord}\\b`, 'g'),
-            new RegExp(`:${escapedWord}\\b`, 'g'),
-            new RegExp(`(?:send|__send__|public_send)\\s*\\(\\s*:${escapedWord}\\b`, 'g'),
-            new RegExp(`(?:send|__send__|public_send)\\s*\\(\\s*["']${escapedWord}\\b`, 'g'),
-            new RegExp(`(?:delegate|alias|alias_method)\\s*:${escapedWord}\\b`, 'g'),
+            rubyReferencePattern(word),
+            new RegExp(`\\.${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`::${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`@${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`@@${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`:${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`(?:send|__send__|public_send)\\s*\\(\\s*:${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`(?:send|__send__|public_send)\\s*\\(\\s*["']${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
+            new RegExp(`(?:delegate|alias|alias_method)\\s*:?${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g'),
             new RegExp(`\\|[^|]*\\b${escapedWord}\\b[^|]*\\|`, 'g'),
             new RegExp(`${escapedWord}:`, 'g'),
-            new RegExp(`respond_to\\?\\s*\\(\\s*:${escapedWord}\\b`, 'g')
+            new RegExp(`respond_to\\?\\s*\\(\\s*:${escapedWord}(?![A-Za-z0-9_?!=$])`, 'g')
         ];
 
         for (const pattern of patterns) {
@@ -310,6 +377,6 @@ export class LegacyRubyParserAdapter {
     }
 
     private escapeRegex(str: string): string {
-        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return escapeRegExp(str);
     }
 }

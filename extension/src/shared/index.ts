@@ -44,3 +44,6 @@ export * from './patterns';
 
 // Utilities
 export * from './utilities';
+
+// Ruby helpers
+export * from './rubyToken';

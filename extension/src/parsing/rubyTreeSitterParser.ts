@@ -48,6 +48,36 @@ const VALIDATION_METHODS = new Set([
 const VISIBILITY_METHODS = new Set(['public', 'private', 'protected']);
 const MIXIN_METHODS = new Set(['include', 'extend', 'prepend']);
 const ATTR_METHODS = new Set(['attr_accessor', 'attr_reader', 'attr_writer']);
+const CALLBACK_METHODS = new Set([
+    'before_action',
+    'after_action',
+    'around_action',
+    'before_save',
+    'after_save',
+    'before_create',
+    'after_create',
+    'before_update',
+    'after_update',
+    'before_destroy',
+    'after_destroy',
+    'around_save',
+    'around_create',
+    'around_update',
+    'around_destroy',
+    'before_validation',
+    'after_validation',
+    'after_initialize',
+    'after_find',
+    'after_touch',
+    'after_commit',
+    'after_rollback',
+    'before_enqueue',
+    'after_enqueue',
+    'around_enqueue',
+    'before_perform',
+    'after_perform',
+    'around_perform'
+]);
 
 const RUBY_KEYWORDS = new Set([
     'if', 'unless', 'while', 'until', 'for', 'case', 'when',
@@ -156,6 +186,7 @@ export class RubyTreeSitterParser {
                 }
 
                 this.applyClassDslCall(classNode, child, offset);
+                classNode.children.push(...this.convertNestedBlockStatements(child, classScope, offset));
                 continue;
             }
 
@@ -196,6 +227,9 @@ export class RubyTreeSitterParser {
             }
 
             moduleNode.children.push(...this.convertStatement(child, moduleScope, offset));
+            if (child.type === 'call') {
+                moduleNode.children.push(...this.convertNestedBlockStatements(child, moduleScope, offset));
+            }
         }
 
         return moduleNode;
@@ -268,7 +302,8 @@ export class RubyTreeSitterParser {
 
         if (ASSOCIATION_METHODS.has(methodName) && firstArg) {
             classNode.children.push(this.node(NodeType.Association, firstArg, node, offset, new Map([
-                ['associationType', methodName]
+                ['associationType', methodName],
+                ['definitionConfidence', 'metaprogramming']
             ])));
             return;
         }
@@ -281,7 +316,42 @@ export class RubyTreeSitterParser {
         }
 
         if (methodName === 'scope' && firstArg) {
-            classNode.children.push(this.node(NodeType.Scope, firstArg, node, offset));
+            classNode.children.push(this.node(NodeType.Scope, firstArg, node, offset, new Map([
+                ['definitionConfidence', 'metaprogramming']
+            ])));
+            return;
+        }
+
+        if (methodName === 'delegate') {
+            for (const arg of args) {
+                const generatedName = this.cleanArgumentText(arg);
+                if (/^[a-z_][a-z0-9_]*[?!=]?$/.test(generatedName)) {
+                    classNode.children.push(this.node(NodeType.GeneratedMethod, generatedName, node, offset, new Map([
+                        ['generatedBy', 'delegate'],
+                        ['definitionConfidence', 'metaprogramming']
+                    ])));
+                }
+            }
+            return;
+        }
+
+        if (methodName === 'alias_method' && args.length >= 2) {
+            const aliasName = this.cleanArgumentText(args[0]);
+            if (aliasName) {
+                classNode.children.push(this.node(NodeType.GeneratedMethod, aliasName, node, offset, new Map([
+                    ['generatedBy', 'alias_method'],
+                    ['aliasedFrom', this.cleanArgumentText(args[1])],
+                    ['definitionConfidence', 'metaprogramming']
+                ])));
+            }
+            return;
+        }
+
+        if (CALLBACK_METHODS.has(methodName) && firstArg) {
+            classNode.children.push(this.node(NodeType.Callback, firstArg, node, offset, new Map([
+                ['callbackType', methodName],
+                ['definitionConfidence', 'metaprogramming']
+            ])));
             return;
         }
 
@@ -290,11 +360,40 @@ export class RubyTreeSitterParser {
                 const attrName = this.cleanArgumentText(arg);
                 if (attrName) {
                     classNode.children.push(this.node(NodeType.Variable, attrName, node, offset, new Map([
-                        ['attrType', methodName.replace('attr_', '')]
+                        ['attrType', methodName.replace('attr_', '')],
+                        ['definitionConfidence', 'metaprogramming']
                     ])));
                 }
             }
         }
+    }
+
+    private convertNestedBlockStatements(
+        node: TreeSitter.Node,
+        scope: RubyScope,
+        offset: PositionOffset
+    ): ASTNode[] {
+        const nodes: ASTNode[] = [];
+        const visit = (child: TreeSitter.Node): void => {
+            if (child.equals(node)) {
+                for (const nested of child.namedChildren) {
+                    visit(nested);
+                }
+                return;
+            }
+
+            if (child.type === 'method' || child.type === 'singleton_method' || child.type === 'class' || child.type === 'module' || child.type === 'assignment') {
+                nodes.push(...this.convertStatement(child, scope, offset));
+                return;
+            }
+
+            for (const nested of child.namedChildren) {
+                visit(nested);
+            }
+        };
+
+        visit(node);
+        return nodes;
     }
 
     private collectMethodCalls(node: TreeSitter.Node, offset: PositionOffset): MethodCall[] {

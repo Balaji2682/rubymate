@@ -356,6 +356,77 @@ export class SemanticGraphBuilder {
     }
 
     /**
+     * Remove semantic data sourced from a single file before re-indexing it.
+     */
+    removeFile(uri: vscode.Uri | string): void {
+        const uriString = typeof uri === 'string' ? uri : uri.toString();
+        const locationMatches = (location: vscode.Location): boolean => location.uri.toString() === uriString;
+        const removedMethods = new Set<string>();
+
+        for (const [name, classInfo] of Array.from(this.graph.classes.entries())) {
+            if (locationMatches(classInfo.location)) {
+                this.graph.classes.delete(name);
+            }
+        }
+
+        for (const [name, moduleInfo] of Array.from(this.graph.modules.entries())) {
+            if (locationMatches(moduleInfo.location)) {
+                this.graph.modules.delete(name);
+            }
+        }
+
+        for (const [id, methodInfo] of Array.from(this.graph.methods.entries())) {
+            if (locationMatches(methodInfo.location)) {
+                this.graph.methods.delete(id);
+                removedMethods.add(id);
+                this.methodCallGraph.removeNode(id);
+            }
+        }
+
+        for (const [caller, edges] of Array.from(this.graph.callGraph.entries())) {
+            const remaining = edges.filter(edge =>
+                !removedMethods.has(edge.caller) &&
+                !removedMethods.has(edge.callee) &&
+                !locationMatches(edge.location)
+            );
+
+            if (remaining.length > 0) {
+                this.graph.callGraph.set(caller, remaining);
+            } else {
+                this.graph.callGraph.delete(caller);
+            }
+        }
+
+        for (const [symbolName, references] of Array.from(this.graph.references.entries())) {
+            const remaining = references.filter(reference => !locationMatches(reference.location));
+            if (remaining.length > 0) {
+                this.graph.references.set(symbolName, remaining);
+            } else {
+                this.graph.references.delete(symbolName);
+            }
+        }
+
+        this.graph.dependencies.delete(uriString);
+
+        for (const [sourceModel, associations] of Array.from(this.graph.associations.entries())) {
+            const remaining = associations.filter(association => !locationMatches(association.location));
+            if (remaining.length > 0) {
+                this.graph.associations.set(sourceModel, remaining);
+            } else {
+                this.graph.associations.delete(sourceModel);
+            }
+        }
+
+        for (const [key, info] of Array.from(this.graph.typeInfo.entries())) {
+            if (locationMatches(info.location)) {
+                this.graph.typeInfo.delete(key);
+            }
+        }
+
+        this.inheritanceIndex.removeFileRelations(uriString);
+    }
+
+    /**
      * Check if new type info is more reliable than existing
      */
     private isMoreReliable(newInfo: TypeInformation, existing: TypeInformation): boolean {
