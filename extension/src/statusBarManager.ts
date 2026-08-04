@@ -20,6 +20,7 @@ export enum ExtensionState {
 export class StatusBarManager {
     private statusBarItem: vscode.StatusBarItem;
     private currentState: ExtensionState = ExtensionState.Initializing;
+    private lastRenderKey: string | undefined;
     private outputChannel: vscode.OutputChannel;
 
     // Debouncer for temporary message revert - ensures we only revert
@@ -87,6 +88,15 @@ export class StatusBarManager {
 
         const icon = this.stateIcons[state];
         const message = customMessage || 'RubyMate';
+
+        // Skip redundant re-renders. Status updates can be driven on every
+        // navigation request, so re-applying an identical state would otherwise
+        // append to the output channel without bound and churn the status bar.
+        const renderKey = `${state}|${message}`;
+        if (renderKey === this.lastRenderKey) {
+            return;
+        }
+        this.lastRenderKey = renderKey;
 
         this.statusBarItem.text = `${icon} ${message}`;
         this.statusBarItem.tooltip = this.stateTooltips[state];

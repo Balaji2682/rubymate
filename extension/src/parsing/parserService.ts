@@ -21,6 +21,7 @@ export interface ParseResult<T> {
     engine: 'tree-sitter' | 'legacy';
     value: T;
     hasErrors?: boolean;
+    errorRanges?: vscode.Range[];
 }
 
 export type ParserRuntimeStatus = 'ready' | 'degraded' | 'failed';
@@ -118,19 +119,16 @@ export class ParserService {
         try {
             const tree = await this.runtime.parse('ruby', document.getText());
             try {
-                if (tree.rootNode.hasError && engine === 'auto') {
-                    this.outputChannel.appendLine(`[Parser] Tree-sitter syntax errors in ${document.uri.fsPath}; using legacy parser`);
-                    return { engine: 'legacy', value: this.legacyAdapter.parse(document), hasErrors: true };
-                }
-
-                if (tree.rootNode.hasError) {
-                    this.outputChannel.appendLine(`[Parser] Tree-sitter syntax errors in ${document.uri.fsPath}`);
+                const hasErrors = tree.rootNode.hasError;
+                if (hasErrors) {
+                    this.outputChannel.appendLine(`[Parser] Tree-sitter syntax errors in ${document.uri.fsPath}; using partial tree-sitter result`);
                 }
 
                 return {
                     engine: 'tree-sitter',
                     value: this.rubyTreeSitterParser.parse(tree),
-                    hasErrors: tree.rootNode.hasError
+                    hasErrors,
+                    errorRanges: hasErrors ? this.rubyTreeSitterParser.collectErrorRanges(tree) : undefined
                 };
             } finally {
                 tree.delete();
@@ -186,10 +184,20 @@ export class ParserService {
                 };
             }
 
+            const symbols = this.symbolsFromAst(document.uri, parsed.value);
+            if (parsed.hasErrors && parsed.errorRanges?.length) {
+                symbols.push(...this.recoverSymbolsInErrorRanges(document, symbols, parsed.errorRanges));
+            }
+
+            // Tree-sitter-ruby reports syntax errors on valid Ruby it cannot parse
+            // (e.g. endless methods with unparenthesized command bodies). When we
+            // still recovered symbols from the partial tree, treat the file as a
+            // healthy parse so a single unparseable line does not degrade the file.
+            // Only a syntax error that yielded nothing usable is a real parse error.
             return {
                 engine: 'tree-sitter',
-                symbols: this.symbolsFromAst(document.uri, parsed.value),
-                status: parsed.hasErrors ? 'parse_error' : 'ok',
+                symbols,
+                status: parsed.hasErrors && symbols.length === 0 ? 'parse_error' : 'ok',
                 hasErrors: parsed.hasErrors
             };
         } catch (error) {
@@ -267,10 +275,6 @@ export class ParserService {
         try {
             const tree = await this.runtime.parse('ruby', document.getText());
             try {
-                if (tree.rootNode.hasError && engine === 'auto') {
-                    return this.legacyAdapter.findReferenceLocations(document, word, includeDeclaration);
-                }
-
                 const references = this.rubyTreeSitterParser.collectReferenceLocations(tree, word)
                     .filter(ref => includeDeclaration || ref.kind !== 'definition')
                     .map(ref => new vscode.Location(document.uri, ref.range));
@@ -363,6 +367,22 @@ export class ParserService {
 
         ast.forEach(visit);
         return methods.find(method => method.range.contains(position));
+    }
+
+    private recoverSymbolsInErrorRanges(
+        document: vscode.TextDocument,
+        astSymbols: RubySymbol[],
+        errorRanges: vscode.Range[]
+    ): RubySymbol[] {
+        const lineInErrorRange = (line: number): boolean =>
+            errorRanges.some(range => line >= range.start.line && line <= range.end.line);
+
+        return this.legacyAdapter.extractSymbols(document)
+            .filter(symbol => lineInErrorRange(symbol.location.range.start.line))
+            .filter(symbol => !astSymbols.some(existing =>
+                existing.name === symbol.name
+                && existing.location.range.start.line === symbol.location.range.start.line))
+            .map(symbol => ({ ...symbol, definitionConfidence: 'fallback' as const }));
     }
 
     private symbolsFromAst(uri: vscode.Uri, ast: ASTNode[]): RubySymbol[] {

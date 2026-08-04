@@ -98,6 +98,30 @@ export class RubyTreeSitterParser {
         return nodes;
     }
 
+    collectErrorRanges(tree: TreeSitter.Tree, offset: PositionOffset = { line: 0, character: 0 }): vscode.Range[] {
+        const ranges: vscode.Range[] = [];
+        const visit = (node: TreeSitter.Node): void => {
+            if (!node.hasError && !node.isMissing) {
+                return;
+            }
+
+            if (node.isError || node.isMissing) {
+                ranges.push(this.rangeFromNode(node, offset));
+                return;
+            }
+
+            for (let i = 0; i < node.childCount; i++) {
+                const child = node.child(i);
+                if (child) {
+                    visit(child);
+                }
+            }
+        };
+
+        visit(tree.rootNode);
+        return ranges;
+    }
+
     collectReferenceLocations(tree: TreeSitter.Tree, symbolName: string): RubyReferenceLocation[] {
         const references: RubyReferenceLocation[] = [];
         const visit = (node: TreeSitter.Node): void => {

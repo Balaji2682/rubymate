@@ -9,6 +9,7 @@ import { RubyDocumentSymbolProvider } from './providers/documentSymbolProvider';
 import { SchemaParser } from './database/schemaParser';
 import { SQLCompletionProvider, ActiveRecordCompletionProvider } from './database/sqlCompletionProvider';
 import { NPlusOneDetector } from './database/n+1Detector';
+import { N1CodeActionProvider } from './database/n1CodeActionProvider';
 import { DatabaseCommands } from './database/databaseCommands';
 import { IntelligentNavigationCommands } from './commands/intelligentNavigation';
 import { RubyDefinitionProvider } from './providers/rubyDefinitionProvider';
@@ -392,6 +393,15 @@ async function initializeDatabaseFeatures(context: vscode.ExtensionContext): Pro
 
         // Initialize N+1 detector
         nPlusOneDetector = new NPlusOneDetector(schemaParser);
+
+        // Register N+1 quick fixes (suppress line / add .includes)
+        context.subscriptions.push(
+            vscode.languages.registerCodeActionsProvider(
+                { language: 'ruby' },
+                new N1CodeActionProvider(),
+                { providedCodeActionKinds: N1CodeActionProvider.providedCodeActionKinds }
+            )
+        );
 
         // Initialize database commands
         databaseCommands = new DatabaseCommands(schemaParser, outputChannel, rubyRuntime);

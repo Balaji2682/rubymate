@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-05
+
+### Fixed
+- Tree-sitter syntax errors no longer degrade a whole file. Previously any parse error discarded the entire tree-sitter result and re-parsed the file with the legacy regex parser, stamping `fallback` confidence on every symbol. RubyMate now keeps tree-sitter's partial AST: symbols in valid regions retain `exact_ast` confidence, and only the symbols on the actual error line(s) are recovered via the legacy parser at `fallback` confidence.
+- Valid Ruby that tree-sitter-ruby cannot parse (e.g. endless methods with unparenthesized command bodies) is treated as a healthy parse when symbols were still recovered, so a single unparseable line no longer marks the file degraded.
+- Errored files are no longer re-parsed on every navigation request. The unchanged-buffer guard now persists the checksum on the parse-retention path and short-circuits zero-symbol files, stopping the continuous re-scan that kept the status bar pinned to a degraded state.
+
+### Added
+- N+1 query quick fixes: suppress the warning on a line, or insert `.includes(:x)` when the source query can be located safely.
+
+### Changed
+- Reworked the N+1 detector and its status-bar handling.
+
 ## [0.4.1] - 2026-08-05
 
 ### Fixed

@@ -16,6 +16,9 @@ export class NPlusOneDetector {
     // Performance: Use shared Debouncer for efficient debouncing per document
     private debouncers: Map<string, Debouncer<void>> = new Map();
     private readonly DEBOUNCE_DELAY = 500; // ms
+    // Schema-derived association knowledge, built lazily once the schema loads
+    private schemaColumns: Set<string> | null = null;
+    private belongsToNames: Set<string> | null = null;
 
     constructor(schemaParser: SchemaParser) {
         this.schemaParser = schemaParser;
@@ -74,112 +77,116 @@ export class NPlusOneDetector {
             return;
         }
 
-        const diagnostics: vscode.Diagnostic[] = [];
-        const text = document.getText();
-        const lines = text.split('\n');
+        const issues = this.analyzeSource(document.getText(), document.uri.fsPath);
+        const diagnostics = issues.map(issue => this.createDiagnostic(document, issue));
+        this.diagnosticCollection.set(document.uri, diagnostics);
+    }
 
-        // Check if this is an ActiveRecord context (model/controller)
-        const isActiveRecordContext = this.isActiveRecordContext(lines);
+    /**
+     * Pure analysis entry point: takes raw Ruby source and returns the N+1
+     * issues, independent of the VS Code document API so it can be unit tested.
+     */
+    analyzeSource(text: string, filePath: string): N1Issue[] {
+        const lines = text.split('\n');
+        // Strip comments so commented-out code is never analyzed and block
+        // delimiters (do/end/{}) living inside comments don't skew depth tracking
+        const strippedLines = lines.map(line => this.stripComment(line));
+
+        const suppression = this.computeSuppressions(lines);
+        if (suppression.fileDisabled) {
+            return [];
+        }
+
+        const isActiveRecordContext = this.isActiveRecordContext(strippedLines, filePath);
+
+        const raw: N1Issue[] = [];
+        for (let i = 0; i < strippedLines.length; i++) {
+            raw.push(...this.detectN1Patterns(strippedLines[i], i, strippedLines, isActiveRecordContext));
+        }
+        // Whole-document check: calling .count on an already-loaded relation
+        // fires an extra COUNT query instead of using the loaded records
+        raw.push(...this.checkLoadThenCount(strippedLines));
+
+        const seen = new Set<string>();
+        const issues: N1Issue[] = [];
+        for (const issue of raw) {
+            if (suppression.disabledLines.has(issue.line)) {
+                continue;
+            }
+            // Respect suppression comments on the line the issue is reported on
+            if (this.hasSuppressionComment(lines[issue.line])) {
+                continue;
+            }
+            const key = `${issue.line}:${issue.message}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            issues.push(issue);
+        }
+        return issues;
+    }
+
+    /**
+     * Resolve file- and block-level suppression directives:
+     *   # rubymate:disable-file           → skip the whole file
+     *   # rubymate:disable / :enable       → skip the enclosed range
+     * Line-level directives are handled separately by hasSuppressionComment.
+     */
+    private computeSuppressions(lines: string[]): { fileDisabled: boolean; disabledLines: Set<number> } {
+        const disabledLines = new Set<number>();
+        let fileDisabled = false;
+        let blockDisabled = false;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-
-            // Skip lines with suppression comments
-            if (this.hasSuppressionComment(line)) {
+            if (/#\s*rubymate:disable-file\b/.test(line)) {
+                fileDisabled = true;
                 continue;
             }
-
-            // Detect N+1 patterns
-            const issues = this.detectN1Patterns(line, i, lines, isActiveRecordContext);
-            for (const issue of issues) {
-                const diagnostic = this.createDiagnostic(document, issue);
-                diagnostics.push(diagnostic);
+            if (/#\s*rubymate:enable\b/.test(line)) {
+                blockDisabled = false;
+                continue;
+            }
+            // A bare `rubymate:disable` (not -line / -file) opens a suppressed block
+            if (/#\s*rubymate:disable\b(?!-)/.test(line)) {
+                blockDisabled = true;
+                continue;
+            }
+            if (blockDisabled) {
+                disabledLines.add(i);
             }
         }
 
-        this.diagnosticCollection.set(document.uri, diagnostics);
+        return { fileDisabled, disabledLines };
     }
 
     /**
      * Detect N+1 query patterns
      */
     private detectN1Patterns(line: string, lineNumber: number, allLines: string[], isActiveRecordContext: boolean): N1Issue[] {
-        const issues: N1Issue[] = [];
-
         // Only check for N+1 in ActiveRecord contexts (models, controllers, views)
         // Skip for non-Rails code (services, lib, etc.) unless explicitly ActiveRecord
         if (!isActiveRecordContext && !this.hasActiveRecordIndicators(line)) {
-            return issues;
+            return [];
         }
 
-        // Pattern 1: Iterating over collection and accessing associations
-        // users.each do |user|
-        //   user.posts.count  ← N+1!
-        // end
+        // Only ever warn about work happening inside an iteration: a query or
+        // association access is only an N+1 when it runs once per row. Bare
+        // queries that are never iterated (or terminal bulk statements such as
+        // .delete_all / .destroy_all) are intentionally left alone.
         if (this.isIterationStart(line)) {
-            const iterationIssues = this.checkIterationBlock(lineNumber, allLines);
-            issues.push(...iterationIssues);
+            return this.checkIterationBlock(lineNumber, allLines);
         }
 
-        // Pattern 2: Calling associations in views
-        // @users.each do |user|
-        //   user.profile  ← N+1!
-        if (/(@\w+|[a-z_]+)\.each\s+do\s+\|(\w+)\|/.test(line)) {
-            const match = line.match(/(@\w+|[a-z_]+)\.each\s+do\s+\|(\w+)\|/);
-            if (match) {
-                const collection = match[1];
-                const item = match[2];
-
-                // Check if assignment has includes/eager_load
-                const assignmentLine = this.findAssignment(collection, lineNumber, allLines);
-                if (assignmentLine && !this.hasEagerLoading(assignmentLine)) {
-                    // This might be N+1
-                    // Need to check if associations are accessed in the block
-                    const hasAssociationAccess = this.checkBlockForAssociationAccess(
-                        item,
-                        lineNumber,
-                        allLines
-                    );
-
-                    if (hasAssociationAccess.found) {
-                        issues.push({
-                            line: lineNumber,
-                            message: `Potential N+1 query: Accessing '${hasAssociationAccess.association}' in iteration`,
-                            severity: vscode.DiagnosticSeverity.Warning,
-                            suggestion: `Add .includes(:${hasAssociationAccess.association}) to the query`,
-                            code: collection
-                        });
-                    }
-                }
-            }
-        }
-
-        // Pattern 3: Direct association access without includes
-        const associationMatch = line.match(/\.(\w+)\s*\.\s*(\w+)/);
-        if (associationMatch && this.looksLikeN1(line)) {
-            const method = associationMatch[1];
-            if (this.isActiveRecordQuery(method)) {
-                const hasIncludes = this.hasEagerLoading(line);
-                if (!hasIncludes) {
-                    issues.push({
-                        line: lineNumber,
-                        message: `Possible N+1: Query without eager loading`,
-                        severity: vscode.DiagnosticSeverity.Information,
-                        suggestion: `Consider adding .includes(...) if accessing associations`,
-                        code: line.trim()
-                    });
-                }
-            }
-        }
-
-        return issues;
+        return [];
     }
 
     /**
      * Check if line starts an iteration block
      */
     private isIterationStart(line: string): boolean {
-        return /\.(each|map|select|find_each|in_batches)\s+do\s+\|/.test(line);
+        return /\.(each|each_with_index|map|collect|flat_map|select|reject|filter|find_each|in_batches|each_slice|each_with_object)\b\s*(?:\([^)]*\))?\s*(?:do\b|\{)\s*\|/.test(line);
     }
 
     /**
@@ -187,56 +194,42 @@ export class NPlusOneDetector {
      */
     private checkIterationBlock(startLine: number, allLines: string[]): N1Issue[] {
         const issues: N1Issue[] = [];
-        const iterationMatch = allLines[startLine].match(/(\w+)\.(each|map)\s+do\s+\|(\w+)\|/);
+        const iterationMatch = allLines[startLine].match(
+            /(@?\w+(?:\.\w+)*)\.(?:each|each_with_index|map|collect|flat_map|select|reject|filter|find_each|in_batches|each_slice|each_with_object)\b\s*(?:\([^)]*\))?\s*(?:do\b|\{)\s*\|\s*(\w+)/
+        );
 
         if (!iterationMatch) {
             return issues;
         }
 
-        const collection = iterationMatch[1];
-        const itemVar = iterationMatch[3];
+        const collection = iterationMatch[1].replace(/^@/, '');
+        const itemVar = iterationMatch[2];
 
-        // Find the end of the block
+        // Whether the source collection already eager-loads its associations.
+        // findAssignment stitches multiline method chains back together so a
+        // .includes(...) placed on its own line still counts.
+        const assignmentLine = this.findAssignment(collection, startLine, allLines);
+        const parentEagerLoaded = assignmentLine !== null && this.hasEagerLoading(assignmentLine);
+
+        const itemRef = new RegExp(`\\b${itemVar}\\b`);
+        const assocRe = new RegExp(`\\b${itemVar}\\.(\\w+)`);
+        const flagged = new Set<number>();
+
+        // Walk the block body tracking real Ruby nesting. Both do/end and {}
+        // blocks are handled, plus keyword openers (if/unless/case/def/begin...)
+        // so an inner `if ... end` no longer terminates the loop scan early.
         let depth = 1;
-        let endLine = startLine + 1;
+        for (let i = startLine; i < allLines.length; i++) {
+            // On the opening line, only the text after the `|item|` params is body
+            const text = i === startLine ? this.bodyAfterBlockParams(allLines[i]) : allLines[i];
 
-        for (let i = startLine + 1; i < allLines.length && depth > 0; i++) {
-            const line = allLines[i].trim();
-            if (line.match(/\bdo\b|\{/)) {
-                depth++;
+            if (text.trim()) {
+                this.scanBlockLine(text, i, itemVar, collection, itemRef, assocRe, parentEagerLoaded, flagged, issues);
             }
-            if (line.match(/\bend\b|\}/)) {
-                depth--;
-            }
-            if (depth === 0) {
-                endLine = i;
+
+            depth += this.structuralDelta(text);
+            if (depth <= 0) {
                 break;
-            }
-        }
-
-        // Check block content for association access
-        for (let i = startLine + 1; i < endLine; i++) {
-            const line = allLines[i];
-
-            // Look for: item_var.association
-            const associationMatch = line.match(new RegExp(`${itemVar}\\.(\\w+)`));
-            if (associationMatch) {
-                const accessed = associationMatch[1];
-
-                // Check if this looks like an association (not a simple attribute)
-                if (this.looksLikeAssociation(accessed)) {
-                    // Check if parent query has includes
-                    const assignmentLine = this.findAssignment(collection, startLine, allLines);
-                    if (assignmentLine && !this.hasEagerLoading(assignmentLine)) {
-                        issues.push({
-                            line: i,
-                            message: `N+1 Query: Accessing '${accessed}' for each ${itemVar}`,
-                            severity: vscode.DiagnosticSeverity.Warning,
-                            suggestion: `Add .includes(:${accessed}) to ${collection} query`,
-                            code: line.trim()
-                        });
-                    }
-                }
             }
         }
 
@@ -244,17 +237,205 @@ export class NPlusOneDetector {
     }
 
     /**
+     * Inspect a single loop-body line for a per-row query or an unpreloaded
+     * association access, appending any issue found.
+     */
+    private scanBlockLine(
+        text: string,
+        lineNumber: number,
+        itemVar: string,
+        collection: string,
+        itemRef: RegExp,
+        assocRe: RegExp,
+        parentEagerLoaded: boolean,
+        flagged: Set<number>,
+        issues: N1Issue[]
+    ): void {
+        // A fresh query executed inside the loop body runs once per row
+        // regardless of eager loading (e.g. Post.find_by(...), User.create!).
+        const perRow = this.detectPerRowQuery(text, itemRef);
+        if (perRow) {
+            issues.push({
+                line: lineNumber,
+                message: `N+1 query: '${perRow}' runs once per ${itemVar}`,
+                severity: vscode.DiagnosticSeverity.Warning,
+                suggestion: `Move '${perRow}' out of the loop or preload the data before iterating`,
+                code: text.trim()
+            });
+            flagged.add(lineNumber);
+            return;
+        }
+
+        // Accessing an association off the loop variable without eager loading
+        // on the source query is the classic N+1.
+        const associationMatch = text.match(assocRe);
+        if (associationMatch && !flagged.has(lineNumber)) {
+            const accessed = associationMatch[1];
+            if (this.looksLikeAssociation(accessed) && !parentEagerLoaded) {
+                issues.push({
+                    line: lineNumber,
+                    message: `N+1 query: accessing '${accessed}' for each ${itemVar}`,
+                    severity: vscode.DiagnosticSeverity.Warning,
+                    suggestion: `Add .includes(:${accessed}) to the ${collection} query`,
+                    code: text.trim()
+                });
+                flagged.add(lineNumber);
+            }
+        }
+    }
+
+    /**
+     * Return the portion of a block-opening line after its `|params|` list,
+     * i.e. the inline body of a one-line block (empty for multiline blocks).
+     */
+    private bodyAfterBlockParams(line: string): string {
+        const params = line.match(/\|\s*[^|]*\|/);
+        return params ? line.slice((params.index ?? 0) + params[0].length) : '';
+    }
+
+    /**
+     * Net change in block-nesting depth contributed by a line. Counts do/end,
+     * brace blocks, and keyword openers (def/class/module/begin/case, plus a
+     * leading if/unless/while/until/for) while ignoring modifier-form keywords
+     * and method calls such as `.end` or `.class`.
+     */
+    private structuralDelta(line: string): number {
+        let delta = 0;
+
+        const keywordOpeners = line.match(/(?<![.:@])\b(?:do|def|class|module|begin|case)\b/g);
+        if (keywordOpeners) {
+            delta += keywordOpeners.length;
+        }
+        // Only a leading conditional/loop keyword opens a block; postfix
+        // modifiers (`x if y`) do not and have no matching `end`.
+        if (/^\s*(?:if|unless|while|until|for)\b/.test(line)) {
+            delta += 1;
+        }
+
+        const ends = line.match(/(?<![.:@])\bend\b/g);
+        if (ends) {
+            delta -= ends.length;
+        }
+
+        delta += (line.match(/\{/g) || []).length;
+        delta -= (line.match(/\}/g) || []).length;
+
+        return delta;
+    }
+
+    /**
+     * Detect an ActiveRecord query executed inside a loop body. Returns the
+     * matched call (e.g. "Post.find_by") when the line issues a per-row query,
+     * otherwise null. Terminal bulk operations are handled by their own
+     * receiver rules and are not treated as per-row work here.
+     */
+    private detectPerRowQuery(line: string, itemRef: RegExp): string | null {
+        // Model-level finders/writers: Post.find_by(...), User.create!(...)
+        const classQuery = line.match(
+            /\b([A-Z]\w*(?:::[A-Z]\w*)*)\.(find|find_by!?|find_or_create_by!?|find_or_initialize_by|create!?|where|first_or_create!?|first_or_initialize|exists\?|count|sum|average|minimum|maximum|pluck)\b/
+        );
+        if (classQuery) {
+            const receiver = classQuery[1];
+            // SCREAMING_CASE receivers are constants/arrays (STATUSES.find), not
+            // AR models — only CamelCase model constants issue queries.
+            const isModelConst = /[a-z]/.test(receiver);
+            // A trailing block (`.find { ... }` / `.count do`) is the Enumerable
+            // form, not a database query.
+            const after = line.slice((classQuery.index ?? 0) + classQuery[0].length);
+            const isEnumerableBlock = /^\s*(?:\{|do\b)/.test(after);
+            if (isModelConst && !isEnumerableBlock) {
+                return `${receiver}.${classQuery[2]}`;
+            }
+        }
+
+        // A query built from the loop variable on any receiver:
+        // scope.find_by(user_id: user.id), account.posts.where(...)
+        const queryMethod = line.match(/\.(where|find|find_by!?|find_or_create_by!?|create!?|first_or_create!?|exists\?)\s*\(/);
+        if (queryMethod && itemRef.test(line)) {
+            return `.${queryMethod[1]}`;
+        }
+
+        return null;
+    }
+
+    /**
      * Find assignment line for a variable
      */
     private findAssignment(varName: string, currentLine: number, allLines: string[]): string | null {
+        // Match a real assignment (`x =` / `@x =`) but never a comparison (`x ==`)
+        const assignRe = new RegExp(`@?\\b${varName}\\b\\s*=(?!=)`);
         // Look backwards for assignment
         for (let i = currentLine - 1; i >= Math.max(0, currentLine - 20); i--) {
             const line = allLines[i];
-            if (line.includes(`${varName} =`) || line.includes(`@${varName} =`)) {
-                return line;
+            if (assignRe.test(line)) {
+                // Stitch multiline method chains so eager loading split across
+                // lines (e.g. a trailing ".includes(:posts)") is not lost.
+                let statement = line;
+                for (let j = i + 1; j < allLines.length; j++) {
+                    const previous = allLines[j - 1].trimEnd();
+                    const next = allLines[j].trim();
+                    const continues = /[.,(&|+\\-]$/.test(previous) || /^(?:\.|&\.)/.test(next);
+                    if (!continues) {
+                        break;
+                    }
+                    statement += ' ' + next;
+                }
+                return statement;
             }
         }
         return null;
+    }
+
+    /**
+     * Remove trailing line comments so commented-out code is never analysed.
+     * Quote state is tracked so a '#' inside a string literal is preserved.
+     */
+    private stripComment(line: string): string {
+        let inSingle = false;
+        let inDouble = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === "'" && !inDouble) {
+                inSingle = !inSingle;
+            } else if (ch === '"' && !inSingle) {
+                inDouble = !inDouble;
+            } else if (ch === '#' && !inSingle && !inDouble) {
+                return line.slice(0, i);
+            }
+        }
+        return line;
+    }
+
+    /**
+     * Detect calling .count on a relation that was already loaded into memory.
+     * .count re-queries the database; .size reuses the loaded records.
+     */
+    private checkLoadThenCount(allLines: string[]): N1Issue[] {
+        const issues: N1Issue[] = [];
+        const loadedAt = new Map<string, number>();
+
+        for (let i = 0; i < allLines.length; i++) {
+            const line = allLines[i];
+
+            const loadMatch = line.match(/\b(@?\w+)\s*=\s*.*\.load\b/) || line.match(/\b(@?\w+)\.load\b/);
+            if (loadMatch) {
+                loadedAt.set(loadMatch[1], i);
+                continue;
+            }
+
+            const countMatch = line.match(/\b(@?\w+)\.count\b/);
+            if (countMatch && loadedAt.has(countMatch[1])) {
+                issues.push({
+                    line: i,
+                    message: `Extra query: '.count' on already-loaded '${countMatch[1]}' hits the database again`,
+                    severity: vscode.DiagnosticSeverity.Information,
+                    suggestion: `Use '.size' to count the records already loaded into memory`,
+                    code: line.trim()
+                });
+            }
+        }
+
+        return issues;
     }
 
     /**
@@ -265,29 +446,54 @@ export class NPlusOneDetector {
     }
 
     /**
-     * Check if method name looks like ActiveRecord query
+     * Build column / belongs_to lookup sets from the parsed schema. Cached once
+     * the schema is available; a null schema leaves them unset so we fall back
+     * to the plural-name heuristic.
      */
-    private isActiveRecordQuery(method: string): boolean {
-        const queryMethods = [
-            'where', 'find', 'find_by', 'all', 'first', 'last',
-            'take', 'pluck', 'select', 'order', 'limit', 'offset'
-        ];
-        return queryMethods.includes(method);
-    }
-
-    /**
-     * Check if line looks like N+1 scenario
-     */
-    private looksLikeN1(line: string): boolean {
-        // Check if line has ActiveRecord query without includes
-        return /\.(where|all|find)\(/.test(line) &&
-            !/\.(includes|eager_load|preload|joins)\(/.test(line);
+    private ensureSchemaSets(): void {
+        if (this.schemaColumns && this.belongsToNames) {
+            return;
+        }
+        const schema = this.schemaParser.getSchema();
+        if (!schema) {
+            return;
+        }
+        const columns = new Set<string>();
+        const belongsTo = new Set<string>();
+        for (const table of schema.tables.values()) {
+            for (const column of table.columns) {
+                columns.add(column.name);
+                // A `<name>_id` foreign key implies a `<name>` belongs_to association
+                const fk = column.name.match(/^(.+)_id$/);
+                if (fk) {
+                    belongsTo.add(fk[1]);
+                }
+            }
+        }
+        this.schemaColumns = columns;
+        this.belongsToNames = belongsTo;
     }
 
     /**
      * Check if name looks like an association
      */
     private looksLikeAssociation(name: string): boolean {
+        // Predicate / bang methods are never associations
+        if (/[?!]$/.test(name)) {
+            return false;
+        }
+
+        this.ensureSchemaSets();
+        // Precise (schema-backed): a `<name>_id` column means `<name>` is a
+        // belongs_to association, so singular associations are caught too.
+        if (this.belongsToNames?.has(name)) {
+            return true;
+        }
+        // A real database column is an attribute access, not an association.
+        if (this.schemaColumns?.has(name)) {
+            return false;
+        }
+
         // Skip common attribute/method names and system/library methods
         const skipList = [
             // Database columns
@@ -327,42 +533,6 @@ export class NPlusOneDetector {
         // Associations are usually plural or specific patterns
         // But be more conservative - only flag if it really looks like an association
         return name.endsWith('s') && !name.endsWith('ss') && name.length > 3; // plural, excluding 'class', 'pass', etc.
-    }
-
-    /**
-     * Check block for association access
-     */
-    private checkBlockForAssociationAccess(
-        itemVar: string,
-        startLine: number,
-        allLines: string[]
-    ): { found: boolean; association?: string } {
-        let depth = 1;
-
-        for (let i = startLine + 1; i < allLines.length && depth > 0; i++) {
-            const line = allLines[i].trim();
-
-            if (line.match(/\bdo\b|\{/)) {
-                depth++;
-            }
-            if (line.match(/\bend\b|\}/)) {
-                depth--;
-                if (depth === 0) {
-                    break;
-                }
-            }
-
-            // Look for association access
-            const match = line.match(new RegExp(`${itemVar}\\.(\\w+)`));
-            if (match) {
-                const accessed = match[1];
-                if (this.looksLikeAssociation(accessed)) {
-                    return { found: true, association: accessed };
-                }
-            }
-        }
-
-        return { found: false };
     }
 
     /**
@@ -452,26 +622,35 @@ export class NPlusOneDetector {
     /**
      * Check if file is in an ActiveRecord context (model, controller, etc.)
      */
-    private isActiveRecordContext(lines: string[]): boolean {
+    private isActiveRecordContext(lines: string[], filePath?: string): boolean {
+        // Path-based: anything under the app directories that routinely handle
+        // ActiveRecord relations (services, jobs, serializers, decorators, ...).
+        if (filePath) {
+            const normalized = filePath.replace(/\\/g, '/');
+            if (/\/app\/(models|controllers|jobs|services|serializers|decorators|mailers|channels|helpers|policies|queries|presenters)\//.test(normalized)) {
+                return true;
+            }
+        }
+
         const fileContent = lines.join('\n');
 
-        // Check for ActiveRecord model
-        if (/class\s+\w+\s*<\s*(ApplicationRecord|ActiveRecord::Base)/.test(fileContent)) {
+        // Any class inheriting from a *Record or *Controller base, including
+        // namespaced/custom bases (e.g. `< Api::BaseController`).
+        if (/class\s+[\w:]+\s*<\s*[\w:]*(?:Record|Controller)\b/.test(fileContent)) {
             return true;
         }
 
-        // Check for ApplicationController or ActionController
-        if (/class\s+\w+\s*<\s*(ApplicationController|ActionController::Base)/.test(fileContent)) {
+        // Background jobs and framework base classes.
+        if (/class\s+[\w:]+\s*<\s*(?:ActiveRecord::Base|ActionController::Base|ApplicationJob|ActiveJob::Base)\b/.test(fileContent)) {
             return true;
         }
 
-        // Check for Rails helpers or concerns
+        // Rails helpers or concerns.
         if (/module\s+\w+\s*(Helper|Concern)/.test(fileContent)) {
             return true;
         }
 
-        // Check if file is in typical Rails paths
-        return false; // File path checking would happen in isExcludedByConfig
+        return false;
     }
 
     /**

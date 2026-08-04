@@ -165,6 +165,7 @@ export class CoreRubyIndex {
     readonly onDidChangeStatus = this.statusEmitter.event;
     private lifecycleState: IndexLifecycleState = 'ready';
     private lifecycleMessage: string | undefined;
+    private lastStatusSignature: string | undefined;
     private lastIndexError: string | undefined;
     private lastIndexDuration = 0;
     private readonly diagnostics: vscode.DiagnosticCollection;
@@ -726,7 +727,10 @@ export class CoreRubyIndex {
             // indexed. Navigation providers call this on every request, so this
             // avoids re-parsing and rewriting the index on every click.
             const existingMeta = this.fileMetadata.get(uriStr);
-            if (existingMeta?.checksum === checksum && this.symbols.has(uriStr)) {
+            if (
+                existingMeta?.checksum === checksum &&
+                (this.symbols.has(uriStr) || existingMeta.symbolCount === 0)
+            ) {
                 return;
             }
 
@@ -752,6 +756,22 @@ export class CoreRubyIndex {
                 // cleanParseFiles is left intact so repeated bad edits keep the
                 // retained symbols until a clean parse restores 'ok'.
                 this.fileStatuses.set(uriStr, fileStatus);
+                if (shouldPersist) {
+                    // Persist the current checksum so re-indexing the same broken
+                    // buffer short-circuits at the guard above. Navigation providers
+                    // re-index the active document on every request, so without this
+                    // the errored file is re-parsed on every click/hover forever.
+                    const previous = this.fileMetadata.get(uriStr);
+                    this.fileMetadata.set(uriStr, {
+                        uri: uriStr,
+                        checksum,
+                        lastIndexed: Date.now(),
+                        symbolCount: this.symbols.get(uriStr)?.length ?? 0,
+                        status: fileStatus,
+                        parserEngine: previous?.parserEngine ?? extraction.engine,
+                        error: extraction.error
+                    });
+                }
                 this.refreshLifecycleState();
                 return;
             }
@@ -1636,7 +1656,26 @@ export class CoreRubyIndex {
     private setLifecycleState(state: IndexLifecycleState, message?: string): void {
         this.lifecycleState = state;
         this.lifecycleMessage = message;
-        this.statusEmitter.fire(this.getIndexLifecycleSnapshot());
+
+        // Only emit when the snapshot actually changes. Navigation providers
+        // re-index the active document on every request, so an unchanged
+        // (e.g. persistently degraded) file would otherwise fire an identical
+        // status event on every keystroke/hover, spamming the status bar and
+        // growing the output channel without bound.
+        const snapshot = this.getIndexLifecycleSnapshot();
+        const signature = [
+            snapshot.state,
+            snapshot.message ?? '',
+            snapshot.totalFiles,
+            snapshot.degradedFiles,
+            snapshot.failedFiles
+        ].join('|');
+        if (signature === this.lastStatusSignature) {
+            return;
+        }
+
+        this.lastStatusSignature = signature;
+        this.statusEmitter.fire(snapshot);
     }
 
     private refreshLifecycleState(): void {
