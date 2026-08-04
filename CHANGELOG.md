@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-05
+
+### Fixed
+- Tree-sitter parser failing to initialize (every file, including gems, silently downgraded to the degraded legacy parser). esbuild resolved web-tree-sitter's ESM entry and lowered `import.meta` to an empty object, so `createRequire(import.meta.url)` threw *"argument 'filename' must be a file URL... received undefined"* on init. The bundle now uses web-tree-sitter's CommonJS build.
+
 ### Added
 - **Semantic Ruby autocompletion** - Context-aware completion that reads the cursor's grammatical situation and answers each accordingly:
   - Member completion after `.`/`&.` resolves the receiver's type (locals, constructors, and inference) and offers its full method resolution order, filtered to reachable visibility

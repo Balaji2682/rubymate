@@ -50,6 +50,13 @@ function copyTreeSitterAssets() {
 async function main() {
   copyTreeSitterAssets();
 
+  // Force the CommonJS build of web-tree-sitter. The default ESM entry uses
+  // `createRequire(import.meta.url)`, which esbuild lowers to an empty
+  // `import.meta` object when bundling to CJS, so `import.meta.url` becomes
+  // undefined and the runtime throws "argument 'filename' must be a file URL"
+  // on init. The .cjs build relies on __filename and avoids this.
+  const treeSitterCjs = path.join(packageRoot('web-tree-sitter'), 'web-tree-sitter.cjs');
+
   const ctx = await esbuild.context({
     entryPoints: ['src/extension.ts'],
     bundle: true,
@@ -59,6 +66,9 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'out/extension.js',
+    alias: {
+      'web-tree-sitter': treeSitterCjs,
+    },
     external: [
       'vscode',
       // Externalize large Node.js built-ins that don't need bundling
